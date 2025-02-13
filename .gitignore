@@ -17,3 +17,6 @@ target/
 #.idea/
 
 models/
+
+# Sound output files for testing
+output/
