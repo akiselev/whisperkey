@@ -45,10 +45,14 @@ fn main() {
 
     // Build the C++ bridge for the Rust <-> C++ interop.
     let mut bridge_builder = cxx_build::bridge("lib.rs");
-    bridge_builder.flag_if_supported("-std=c++14");
+    bridge_builder.flag_if_supported("-std=c++17");
+    bridge_builder.flag_if_supported("/std:c++17");
+    bridge_builder.flag_if_supported("/EHsc");
+    
     for include_dir in &target.include_directories {
         bridge_builder.include(include_dir);
     }
+    bridge_builder.include(".");
     bridge_builder.compile("ctranslate2-sys-bridge");
 
     // Re-run if the bridge file or any of the included C++ headers change.

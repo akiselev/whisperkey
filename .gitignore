@@ -20,3 +20,6 @@ models/
 
 # Sound output files for testing
 output/
+
+# cc/cxx flag check
+flag_check.exe

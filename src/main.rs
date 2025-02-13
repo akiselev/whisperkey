@@ -168,6 +168,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let wav_path = save_wav_file(&denoised_audio, sample_rate, channels)?;
     println!("Saved denoised audio to: {}", wav_path.display());
 
+    // Instantiate our C++ Whisper model wrapper from ctranslate2_sys
+    let ctranslate2_whisper = ctranslate2_sys::Whisper::new("models/", 0);
+
     // Initialize Whisper with optimized parameters
     let model_path = "models/ggml-base.en.bin";
     let mut context_params = whisper_rs::WhisperContextParameters::default();
