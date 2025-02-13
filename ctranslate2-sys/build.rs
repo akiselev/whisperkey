@@ -19,8 +19,38 @@ fn main() {
 
     // Instruct Cargo to link the final binary against this target.
     // This prints the necessary cargo:rustc-link-* directives.
-    target.link();
+    // target.link();
+    target.link_directories.iter().for_each(|dir| {
+        println!("cargo:warning=\r\x1b[32;1m cargo:rustc-link-search=native={}", dir);
+        println!("cargo:rustc-link-search=native={}", dir);
+    });
+    target.link_options.iter().for_each(|opt| {
+        println!("cargo:warning=\r\x1b[32;1m cargo:rustc-link-arg={}", opt);
+        println!("cargo:rustc-link-arg={}", opt);
+    });
+    target.link_libraries.iter().for_each(|lib| {
+        if lib.starts_with("-") {
+            println!("cargo:warning=\r\x1b[32;1m cargo:rustc-link-arg={}", lib);
+            println!("cargo:rustc-link-arg={}", lib);
+        } else {
+            println!("cargo:warning=\r\x1b[32;1m cargo:rustc-link-lib=dylib={}", link_name(lib));
+            println!("cargo:rustc-link-lib=dylib={}", link_name(lib));
+        }
+
+        if let Some(lib) = link_dir(lib) {
+            println!("cargo:warning=\r\x1b[32;1m cargo:rustc-link-search=native={}", lib);
+            println!("cargo:rustc-link-search=native={}", lib);
+        }
+    });
 
     // Re-run the build script if this file changes.
-    // println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=build.rs");
+}
+
+fn link_name(lib: &str) -> String {
+    lib.replace("C:", "/c/").replace("\\", "/")
+}
+
+fn link_dir(_lib: &str) -> Option<&str> {
+    None
 }

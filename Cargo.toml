@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "core"]
+members = [".", "core", "ctranslate2-sys"]
 
 [package]
 name = "whisperkey"
@@ -17,6 +17,8 @@ whisper-rs = { workspace = true }
 whisperkey_core = { workspace = true }
 hound = "3.5"
 nnnoiseless = "0.5.0"
+ctranslate2-sys = { workspace = true }
+
 
 [workspace.dependencies]
 clap = "4.5.29"
@@ -29,3 +31,4 @@ tray-icon = "0.19.2"
 whisper-rs = "0.13.2"
 
 whisperkey_core = { path = "./core" }
+ctranslate2-sys = { path = "./ctranslate2-sys" }
