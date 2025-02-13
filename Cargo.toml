@@ -16,6 +16,7 @@ enigo = { workspace = true }
 whisper-rs = { workspace = true }
 whisperkey_core = { workspace = true }
 hound = "3.5"
+nnnoiseless = "0.5.0"
 
 [workspace.dependencies]
 clap = "4.5.29"

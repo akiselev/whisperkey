@@ -10,6 +10,8 @@ use hound::{WavWriter, WavSpec};
 
 use enigo::{Enigo, Keyboard, Settings};
 
+use nnnoiseless::DenoiseState;
+
 // Helper: convert i16 samples to f32 in [-1.0, 1.0]
 fn convert_i16_to_f32(samples: &[i16]) -> Vec<f32> {
     samples.iter().map(|&s| s as f32 / i16::MAX as f32).collect()
@@ -18,6 +20,36 @@ fn convert_i16_to_f32(samples: &[i16]) -> Vec<f32> {
 // Helper: convert u16 samples to f32 (centered at zero)
 fn convert_u16_to_f32(samples: &[u16]) -> Vec<f32> {
     samples.iter().map(|&s| (s as f32 - 32768.0) / 32768.0).collect()
+}
+
+// Add this helper function after your existing convert functions
+fn denoise_audio(audio_data: &[f32], channels: u16, sample_rate: u32) -> Vec<f32> {
+    // RNNoise expects 48kHz mono audio, so we'll need to handle that
+    let mut denoiser = DenoiseState::new();
+    let frame_size = DenoiseState::FRAME_SIZE;
+    let mut denoised = Vec::with_capacity(audio_data.len());
+    
+    // If stereo, convert to mono first
+    let mono_audio: Vec<f32> = if channels == 2 {
+        audio_data.chunks(2)
+            .map(|chunk| (chunk[0] + chunk[1]) / 2.0)
+            .collect()
+    } else {
+        audio_data.to_vec()
+    };
+
+    // Process audio in frames
+    for chunk in mono_audio.chunks(frame_size) {
+        let mut frame = vec![0.0; frame_size];
+        frame[..chunk.len()].copy_from_slice(chunk);
+        
+        let mut output = vec![0.0; frame_size];
+        denoiser.process_frame(&mut output, &frame);
+        
+        denoised.extend_from_slice(&output[..chunk.len()]);
+    }
+
+    denoised
 }
 
 fn save_wav_file(
@@ -126,9 +158,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     println!("Captured {} samples", audio_data.len());
 
-    // Save the audio data to a WAV file
-    let wav_path = save_wav_file(&audio_data, sample_rate, channels)?;
-    println!("Saved audio to: {}", wav_path.display());
+    // Denoise the audio before saving and transcribing
+    println!("Denoising audio...");
+    let denoised_audio = denoise_audio(&audio_data, channels, sample_rate);
+    
+    // Save the denoised audio data to a WAV file
+    let wav_path = save_wav_file(&denoised_audio, sample_rate, channels)?;
+    println!("Saved denoised audio to: {}", wav_path.display());
 
     // Initialize Whisper with optimized parameters
     let model_path = "models/ggml-base.en.bin";
@@ -175,8 +211,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Starting transcription...");
     
-    // Run transcription on the complete audio buffer
-    state.full(params, &audio_data)?;
+    // Use denoised audio for transcription
+    state.full(params, &denoised_audio)?;
 
     // Retrieve and combine all segments with better handling
     let num_segments = state.full_n_segments()?;
