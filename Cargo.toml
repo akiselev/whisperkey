@@ -15,6 +15,7 @@ cpal = { workspace = true }
 enigo = { workspace = true }
 whisper-rs = { workspace = true }
 whisperkey_core = { workspace = true }
+hound = "3.5"
 
 [workspace.dependencies]
 clap = "4.5.29"
