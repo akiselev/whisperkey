@@ -11,3 +11,9 @@ Afterwards, you can build with `cargo build` but you may need to set the cmake p
 ```bash
 CMAKE_PREFIX_PATH=/c/ctranslate2/install cargo build
 ```
+
+You can call the following command to debug the ctranslate2 location:
+
+```bash
+cmake -DCMAKE_FIND_DEBUG_MODE=ON -DCMAKE_PREFIX_PATH="/c/ctranslate2/install" -P ctranslate2-sys/ctranslate2.cmake
+```
