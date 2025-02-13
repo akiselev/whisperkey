@@ -11,6 +11,9 @@ tray-icon = { workspace = true }
 #relm4 = { workspace = true }
 #gtk = { version = "0.18" }             # or "gtk3" if needed
 clap = { workspace = true }
+cpal = { workspace = true }
+enigo = { workspace = true }
+whisper-rs = { workspace = true }
 whisperkey_core = { workspace = true }
 
 [workspace.dependencies]

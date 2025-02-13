@@ -1,15 +1,11 @@
-// main.rs
-
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Sample, SampleFormat};
+use cpal::SampleFormat;
 
-use enigo::{Enigo, KeyboardControllable};
-
-use whisper_rs::WhisperState; // assumes the whisper-rs crate is added as a dependency
+use enigo::{Enigo, Keyboard, Settings};
 
 // Helper: convert i16 samples to f32 in [-1.0, 1.0]
 fn convert_i16_to_f32(samples: &[i16]) -> Vec<f32> {
@@ -48,6 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 buf.extend_from_slice(data);
             },
             move |err| eprintln!("Stream error: {:?}", err),
+            None,
         )?,
         SampleFormat::I16 => device.build_input_stream(
             &stream_config,
@@ -57,6 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 buf.extend(converted);
             },
             move |err| eprintln!("Stream error: {:?}", err),
+            None,
         )?,
         SampleFormat::U16 => device.build_input_stream(
             &stream_config,
@@ -66,7 +64,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 buf.extend(converted);
             },
             move |err| eprintln!("Stream error: {:?}", err),
+            None,
         )?,
+        sample_format => panic!("Unsupported sample format '{sample_format}'")
     };
 
     // Start recording.
@@ -85,29 +85,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Captured {} samples", audio_data.len());
 
     // Initialize the Whisper model.
-    // (Make sure the model binary exists at the specified path.)
     let model_path = "models/ggml-base.en.bin";
-    let mut whisper_state =
-        WhisperState::new(model_path).expect("Failed to initialize whisper model");
+    let ctx = whisper_rs::WhisperContext::new_with_params(
+        model_path,
+        whisper_rs::WhisperContextParameters::default()
+    )?;
+    let mut state = ctx.create_state()?;
 
-    // Run transcription (full mode) on the recorded samples.
-    // (Note: the model expects a specific sample rate; ensure your recording matches it.)
-    whisper_state
-        .full(&audio_data)
-        .expect("Transcription failed");
+    // Create parameters for full transcription
+    let mut params = whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::default());
+    params.set_print_progress(true);
+    params.set_print_timestamps(true);
+    params.set_language(Some("en"));
 
-    // Retrieve transcription segments and combine their text.
-    let segments = whisper_state.get_segments();
-    let transcription: String = segments
-        .into_iter()
-        .map(|seg| seg.text)
-        .collect::<Vec<String>>()
-        .join(" ");
+    // Run transcription (full mode) on the recorded samples
+    state.full(params, &audio_data)?;
+
+    // Retrieve transcription segments and combine their text
+    let num_segments = state.full_n_segments()?;
+    let mut transcription = String::new();
+    
+    for i in 0..num_segments {
+        transcription.push_str(&state.full_get_segment_text(i)?);
+        transcription.push(' ');
+    }
     println!("Transcription: {}", transcription);
 
     // Use enigo to simulate typing the transcribed text into the active window.
-    let mut enigo = Enigo::new();
-    enigo.text(&transcription);
+    let mut enigo = Enigo::new(&Settings::default())?;
+    enigo.text(&transcription)?;
     println!("Transcription sent as simulated keystrokes.");
 
     Ok(())
