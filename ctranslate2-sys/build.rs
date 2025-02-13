@@ -1,4 +1,5 @@
 use cmake_package::find_package;
+use cxx_build;
 
 fn main() {
     // Try to locate the installed CTranslate2 package.
@@ -19,7 +20,6 @@ fn main() {
 
     // Instruct Cargo to link the final binary against this target.
     // This prints the necessary cargo:rustc-link-* directives.
-    // target.link();
     target.link_directories.iter().for_each(|dir| {
         println!("cargo:warning=\r\x1b[32;1m cargo:rustc-link-search=native={}", dir);
         println!("cargo:rustc-link-search=native={}", dir);
@@ -34,7 +34,7 @@ fn main() {
             println!("cargo:rustc-link-arg={}", lib);
         } else {
             println!("cargo:warning=\r\x1b[32;1m cargo:rustc-link-lib=dylib={}", link_name(lib));
-            println!("cargo:rustc-link-lib=dylib={}", link_name(lib));
+            println!("cargo:rustc-link-lib={}", link_name(lib));
         }
 
         if let Some(lib) = link_dir(lib) {
@@ -43,12 +43,23 @@ fn main() {
         }
     });
 
-    // Re-run the build script if this file changes.
+    // Build the C++ bridge for the Rust <-> C++ interop.
+    let mut bridge_builder = cxx_build::bridge("lib.rs");
+    bridge_builder.flag_if_supported("-std=c++14");
+    for include_dir in &target.include_directories {
+        bridge_builder.include(include_dir);
+    }
+    bridge_builder.compile("ctranslate2-sys-bridge");
+
+    // Re-run if the bridge file or any of the included C++ headers change.
+    println!("cargo:rerun-if-changed=src/lib.rs");
     println!("cargo:rerun-if-changed=build.rs");
 }
 
 fn link_name(lib: &str) -> String {
-    lib.replace("C:", "/c/").replace("\\", "/")
+    // lib.replace("C:\\", "/c/").replace("\\", "/")
+    lib.replace("C:/", "/c/").replace("/bin/", "/lib/").replace(".dll", ".lib")
+    // lib.to_string()
 }
 
 fn link_dir(_lib: &str) -> Option<&str> {

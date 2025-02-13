@@ -8,3 +8,7 @@ path = "lib.rs"
 
 [build-dependencies]
 cmake-package = "0.1.5"
+cxx-build = "1.0.140"
+
+[dependencies]
+cxx = "1.0.140"
