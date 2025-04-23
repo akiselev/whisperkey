@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "core", "ctranslate2-sys"]
+members = [".", "core"]
 
 [package]
 name = "whisperkey"
