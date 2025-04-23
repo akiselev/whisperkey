@@ -1,0 +1,181 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  SCCACHE_VERSION: 0.7.4
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: /usr/local/bin/sccache
+  CACHE_VERSION: 1
+
+jobs:
+  windows-cross:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/devcontainers/rust:1-bullseye
+      volumes:
+        - ${{ github.workspace }}:/workspace
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup sccache
+        run: |
+          curl -L "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl.tar.gz" | tar xz
+          install -m 755 sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl/sccache /usr/local/bin/sccache
+          rm -rf sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl
+
+      - name: Cache cargo registry and sccache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry/
+            ~/.cargo/git/
+            ~/.cache/sccache/
+          key: ${{ runner.os }}-cargo-windows-${{ env.CACHE_VERSION }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-windows-${{ env.CACHE_VERSION }}-
+
+      - name: Build with devcontainer
+        run: |
+          apt-get update && export DEBIAN_FRONTEND=noninteractive
+          apt-get -y install --no-install-recommends gcc-mingw-w64 g++-mingw-w64 binutils-mingw-w64 \
+            pkg-config cmake make git curl libssl-dev libudev-dev libgtk-3-dev build-essential ninja-build
+
+          # Configure environment for cross-compilation
+          export CC_x86_64_pc_windows_gnu=x86_64-w64-mingw32-gcc
+          export CXX_x86_64_pc_windows_gnu=x86_64-w64-mingw32-g++
+          export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc
+
+          cd $GITHUB_WORKSPACE
+          mkdir -p .cargo
+          echo '[target.x86_64-pc-windows-gnu]' > .cargo/config.toml
+          echo 'linker = "x86_64-w64-mingw32-gcc"' >> .cargo/config.toml
+          echo 'ar = "x86_64-w64-mingw32-gcc-ar"' >> .cargo/config.toml
+
+          # Start sccache server
+          sccache --start-server
+          sccache -s
+
+          # Build for Windows
+          rustup target add x86_64-pc-windows-gnu
+          cargo build --release --target x86_64-pc-windows-gnu
+
+          # Print sccache stats
+          sccache -s
+
+      - name: Upload Windows build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: windows-build
+          path: target/x86_64-pc-windows-gnu/release/*.exe
+
+  linux-build:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/devcontainers/rust:1-bullseye
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup sccache
+        run: |
+          curl -L "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl.tar.gz" | tar xz
+          install -m 755 sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl/sccache /usr/local/bin/sccache
+          rm -rf sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl
+
+      - name: Cache cargo registry and sccache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry/
+            ~/.cargo/git/
+            ~/.cache/sccache/
+          key: ${{ runner.os }}-cargo-linux-${{ env.CACHE_VERSION }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-linux-${{ env.CACHE_VERSION }}-
+
+      - name: Build Linux binary
+        run: |
+          apt-get update && export DEBIAN_FRONTEND=noninteractive
+          apt-get -y install --no-install-recommends cmake make git curl libssl-dev libudev-dev libgtk-3-dev build-essential
+
+          cd $GITHUB_WORKSPACE
+
+          # Start sccache server
+          sccache --start-server
+          sccache -s
+
+          # Build for Linux
+          cargo build --release
+
+          # Print sccache stats
+          sccache -s
+
+      - name: Upload Linux build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: linux-build
+          path: |
+            target/release/whisperkey
+            target/release/transcriber
+          if-no-files-found: error
+
+  macos-build:
+    runs-on: macos-latest
+    env:
+      RUSTC_WRAPPER: /usr/local/bin/sccache
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Setup sccache
+        run: |
+          curl -L "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/sccache-v${SCCACHE_VERSION}-x86_64-apple-darwin.tar.gz" | tar xz
+          sudo install -m 755 sccache-v${SCCACHE_VERSION}-x86_64-apple-darwin/sccache /usr/local/bin/sccache
+          rm -rf sccache-v${SCCACHE_VERSION}-x86_64-apple-darwin
+
+      - name: Cache cargo registry and sccache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry/
+            ~/.cargo/git/
+            ~/.cache/sccache/
+          key: ${{ runner.os }}-cargo-macos-${{ env.CACHE_VERSION }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-macos-${{ env.CACHE_VERSION }}-
+
+      - name: Install Dependencies
+        run: |
+          brew install cmake ninja
+
+      - name: Build macOS Binary
+        run: |
+          # Start sccache server
+          sccache --start-server
+          sccache -s
+
+          # Build for macOS
+          cargo build --release
+
+          # Print sccache stats
+          sccache -s
+
+      - name: Upload macOS build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: macos-build
+          path: |
+            target/release/whisperkey
+            target/release/transcriber
+          if-no-files-found: error
