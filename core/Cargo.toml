@@ -3,8 +3,6 @@ name = "whisperkey_core"
 version = "0.1.0"
 edition = "2021"
 
-[lib]
-path = "lib.rs"
 
 [dependencies]
 whisper-rs = { workspace = true }
@@ -13,3 +11,4 @@ enigo = { workspace = true }
 clap = { workspace = true }
 stakker = "0.2.12"
 tracing = "0.1"
+thiserror = "1.0"
