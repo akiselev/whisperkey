@@ -21,6 +21,7 @@ tracing-subscriber = "0.3.19"
 ractor = "0.13"
 tokio = { version = "1", features = ["full"] }
 flume = "0.10"
+dirs = "5.0"
 
 
 [workspace.dependencies]

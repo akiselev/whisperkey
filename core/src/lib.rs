@@ -1,4 +1,5 @@
 use ractor::{Actor, ActorRef};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 pub mod audio_capture;
@@ -15,9 +16,10 @@ pub struct CoreHandles {
 
 pub async fn init_core_actors(
     ui_sender: Arc<dyn Fn(AppOutput) + Send + Sync + 'static>,
+    model_path: Option<PathBuf>,
 ) -> CoreHandles {
     // Spawn coordinator actor
-    let (coordinator, _handle) = Actor::spawn(None, Coordinator {}, ui_sender)
+    let (coordinator, _handle) = Actor::spawn(None, Coordinator {}, (ui_sender, model_path))
         .await
         .expect("Failed to start coordinator actor");
 

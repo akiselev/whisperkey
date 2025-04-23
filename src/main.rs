@@ -1,5 +1,6 @@
 use gtk::prelude::*;
 use relm4::prelude::*;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use whisperkey_core::{init_core_actors, types::AppOutput, CoordinatorMsg, CoreHandles};
@@ -54,8 +55,17 @@ impl SimpleComponent for AppModel {
                 });
             });
 
+            // Get model path - in a real app this would come from config
+            // For testing, we'll look for a model in a default location
+            let model_path = get_default_model_path();
+            if let Some(path) = &model_path {
+                println!("Using Vosk model at: {:?}", path);
+            } else {
+                println!("No model path found, transcriber will fail to start!");
+            }
+
             // Initialize core actors
-            let core_handles = init_core_actors(ui_sender).await;
+            let core_handles = init_core_actors(ui_sender, model_path).await;
 
             // Store core handles in a thread-local static to pass back to the model
             thread_local! {
@@ -215,6 +225,34 @@ impl SimpleComponent for AppModel {
             }
         }
     }
+}
+
+// Helper function to find a Vosk model
+fn get_default_model_path() -> Option<PathBuf> {
+    // Check a few common locations
+    let possible_paths = vec![
+        // Current directory
+        Some(PathBuf::from("model")),
+        // User's home directory
+        dirs::home_dir().map(|p| p.join("vosk-model")),
+        // Windows specific
+        Some(PathBuf::from("C:/Program Files/Vosk/model")),
+        // Linux specific
+        Some(PathBuf::from("/usr/share/vosk-model")),
+        // MacOS specific
+        dirs::home_dir().map(|p| p.join("Library/Application Support/Vosk/model")),
+    ];
+
+    // Return the first path that exists and is a directory
+    for maybe_path in possible_paths {
+        if let Some(path) = maybe_path {
+            if path.exists() && path.is_dir() {
+                return Some(path);
+            }
+        }
+    }
+
+    None
 }
 
 fn main() {

@@ -404,6 +404,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8acebd8ad879283633b343856142139f2da2317c96b05b4dd6181c61e2480184"
 dependencies = [
  "clap_builder",
+ "clap_derive",
 ]
 
 [[package]]
@@ -416,6 +417,18 @@ dependencies = [
  "anstyle",
  "clap_lex 0.7.4",
  "strsim 0.11.1",
+]
+
+[[package]]
+name = "clap_derive"
+version = "4.5.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf4ced95c6f4a675af3da73304b9ac4ed991640c36374e4b46795c49e17cf1ed"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.98",
 ]
 
 [[package]]
@@ -2879,10 +2892,12 @@ dependencies = [
 name = "transcriber"
 version = "0.1.0"
 dependencies = [
+ "clap 4.5.29",
  "serde",
  "serde_json",
  "tracing",
  "tracing-subscriber",
+ "vosk",
 ]
 
 [[package]]
@@ -2950,6 +2965,24 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vosk"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae9e2a552b3fb49f097849cfed3d4a2a7163bb7ea507268666980605a676c627"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+ "vosk-sys",
+]
+
+[[package]]
+name = "vosk-sys"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73ab2937e19c7d32c1a077a4a220011cbbb2b6ab83bb35635ffb65a82b7e43f6"
 
 [[package]]
 name = "walkdir"
@@ -3087,6 +3120,7 @@ version = "0.1.0"
 dependencies = [
  "clap 4.5.29",
  "cpal",
+ "dirs",
  "enigo",
  "flume 0.10.14",
  "gtk4",

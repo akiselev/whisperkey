@@ -1,5 +1,6 @@
 use ractor::{Actor, ActorProcessingErr, ActorRef};
 use std::io::{BufRead, BufReader, Write};
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -18,6 +19,8 @@ pub enum TranscriberError {
     CommunicationError(String),
     #[error("Transcriber process exited unexpectedly")]
     ProcessExitedError,
+    #[error("No model path provided for transcriber")]
+    NoModelPathError,
 }
 
 pub struct TranscriberActor {
@@ -43,38 +46,59 @@ pub struct TranscriberState {
 
     // Configuration
     sample_rate: u32,
+    model_path: Option<PathBuf>,
 }
 
 #[ractor::async_trait]
 impl Actor for TranscriberActor {
     type Msg = TranscriberMsg;
     type State = TranscriberState;
-    type Arguments = (ActorRef<CoordinatorMsg>, u32); // Coordinator ref and sample rate
+    type Arguments = (ActorRef<CoordinatorMsg>, u32, Option<PathBuf>); // Coordinator ref, sample rate, and model path
 
     async fn pre_start(
         &self,
         myself: ActorRef<Self::Msg>,
-        (coordinator, sample_rate): Self::Arguments,
+        (coordinator, sample_rate, model_path): Self::Arguments,
     ) -> Result<Self::State, ActorProcessingErr> {
         tracing::info!(
             "TranscriberActor starting with sample rate: {}",
             sample_rate
         );
 
+        if let Some(path) = &model_path {
+            tracing::info!("Using Vosk model at: {:?}", path);
+        } else {
+            tracing::warn!("No model path provided, transcriber may fail to start!");
+            // We'll continue and let the transcriber process handle the error
+        }
+
         // Create a channel for sending audio chunks to the stdin thread
         let (chunk_sender, chunk_receiver) = std::sync::mpsc::channel::<AudioChunk>();
         let chunk_sender = Arc::new(Mutex::new(chunk_sender));
 
-        // Start the transcriber process
-        let mut process = Command::new("cargo")
-            .args(["run", "--package", "transcriber"])
+        // Start the transcriber process with proper arguments
+        let mut command = Command::new("cargo");
+        command.args(["run", "--package", "transcriber"]);
+
+        // Add model path if specified
+        if let Some(path) = &model_path {
+            command.args(["--", "--model-path", path.to_str().unwrap_or("")]);
+        }
+
+        // Add sample rate
+        command.args(["--sample-rate", &sample_rate.to_string()]);
+
+        // Configure stdio
+        command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit()) // Forward stderr to parent for easy debugging
-            .spawn()
-            .map_err(|e| {
-                ActorProcessingErr::from(TranscriberError::ProcessStartError(e.to_string()))
-            })?;
+            .stderr(Stdio::inherit()); // Forward stderr to parent for easy debugging
+
+        tracing::debug!("Executing command: {:?}", command);
+
+        let mut process = command.spawn().map_err(|e| {
+            ActorProcessingErr::from(TranscriberError::ProcessStartError(e.to_string()))
+        })?;
 
         // Get handles to stdin/stdout
         let stdin = process.stdin.take().ok_or_else(|| {
@@ -230,6 +254,7 @@ impl Actor for TranscriberActor {
             coordinator,
             is_shutting_down: false,
             sample_rate,
+            model_path,
         })
     }
 

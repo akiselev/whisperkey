@@ -1,4 +1,5 @@
 use ractor::{Actor, ActorProcessingErr, ActorRef};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::{
@@ -15,21 +16,32 @@ pub struct CoordinatorState {
     ui_sender: Arc<dyn Fn(AppOutput) + Send + Sync + 'static>,
     audio_capture: Option<ActorRef<AudioCaptureMsg>>,
     transcriber: Option<ActorRef<TranscriberMsg>>,
-    sample_rate: u32, // Add sample rate for transcriber
+    sample_rate: u32,            // Add sample rate for transcriber
+    model_path: Option<PathBuf>, // Path to Vosk model
 }
 
 #[ractor::async_trait]
 impl Actor for Coordinator {
     type Msg = CoordinatorMsg;
     type State = CoordinatorState;
-    type Arguments = Arc<dyn Fn(AppOutput) + Send + Sync + 'static>;
+    type Arguments = (
+        Arc<dyn Fn(AppOutput) + Send + Sync + 'static>,
+        Option<PathBuf>,
+    );
 
     async fn pre_start(
         &self,
         myself: ActorRef<Self::Msg>,
-        ui_sender: Self::Arguments,
+        (ui_sender, model_path): Self::Arguments,
     ) -> Result<Self::State, ActorProcessingErr> {
         tracing::info!("Coordinator actor started");
+
+        // Log model path if provided
+        if let Some(path) = &model_path {
+            tracing::info!("Using Vosk model at: {:?}", path);
+        } else {
+            tracing::warn!("No model path provided, using default");
+        }
 
         // Use a fixed sample rate for now - could be configurable later
         let sample_rate = 16000; // 16 kHz is common for speech recognition
@@ -44,16 +56,19 @@ impl Actor for Coordinator {
                 ))
             })?;
 
-        // Spawn the transcriber actor
-        let (transcriber, _) =
-            Actor::spawn(None, TranscriberActor {}, (myself.clone(), sample_rate))
-                .await
-                .map_err(|e| {
-                    ActorProcessingErr::from(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("Failed to start transcriber actor: {}", e),
-                    ))
-                })?;
+        // Spawn the transcriber actor with model path
+        let (transcriber, _) = Actor::spawn(
+            None,
+            TranscriberActor {},
+            (myself.clone(), sample_rate, model_path.clone()),
+        )
+        .await
+        .map_err(|e| {
+            ActorProcessingErr::from(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to start transcriber actor: {}", e),
+            ))
+        })?;
 
         // Send initial status to UI
         (ui_sender)(AppOutput::UpdateStatus("Initialized".to_string()));
@@ -64,6 +79,7 @@ impl Actor for Coordinator {
             audio_capture: Some(audio_capture),
             transcriber: Some(transcriber),
             sample_rate,
+            model_path,
         })
     }
 
