@@ -6,6 +6,7 @@ pub mod audio_capture;
 pub mod audio_processor;
 pub mod config;
 pub mod coordinator;
+pub mod keyboard_output;
 pub mod transcriber;
 pub mod types;
 

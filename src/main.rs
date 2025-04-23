@@ -19,12 +19,14 @@ enum AppInput {
     UpdateCoreHandles,
     UpdateTextBuffer(String),
     OpenSettings,
+    ToggleKeyboardOutput(bool),
 }
 
 struct AppModel {
     core_handles: Option<CoreHandles>,
     status_text: String,
     transcription_text: String,
+    keyboard_output_enabled: bool,
 }
 
 #[relm4::component]
@@ -38,10 +40,17 @@ impl SimpleComponent for AppModel {
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
+        // Load config to check for keyboard output setting
+        let config = load_config().unwrap_or_else(|e| {
+            eprintln!("Failed to load config: {}", e);
+            Arc::new(whisperkey_core::Settings::default())
+        });
+
         let model = Self {
             core_handles: None,
             status_text: "Starting...".to_string(),
             transcription_text: "".to_string(),
+            keyboard_output_enabled: config.enable_keyboard_output,
         };
 
         // Setup a background worker to receive messages from the core
@@ -179,6 +188,28 @@ impl SimpleComponent for AppModel {
                         },
                     },
 
+                    // Keyboard output toggle
+                    gtk::Box {
+                        set_orientation: gtk::Orientation::Horizontal,
+                        set_spacing: 8,
+                        set_margin_bottom: 12,
+
+                        gtk::CheckButton {
+                            set_label: Some("Enable Keyboard Output"),
+                            #[watch]
+                            set_active: model.keyboard_output_enabled,
+                            connect_toggled[sender] => move |btn| {
+                                let active = btn.is_active();
+                                sender.input(AppInput::ToggleKeyboardOutput(active));
+                            }
+                        },
+
+                        gtk::Label {
+                            set_text: "Warning: Will type text into the active application!",
+                            set_margin_start: 10,
+                        }
+                    },
+
                     // Transcription area
                     gtk::Label {
                         set_label: "Transcription Results:",
@@ -242,6 +273,18 @@ impl SimpleComponent for AppModel {
                         .send_message(CoordinatorMsg::StopListening)
                         .unwrap();
                     println!("Sent StopListening message to coordinator");
+                } else {
+                    self.status_text = "Core not ready yet".to_string();
+                }
+            }
+            AppInput::ToggleKeyboardOutput(enable) => {
+                if let Some(handles) = &self.core_handles {
+                    handles
+                        .coordinator
+                        .send_message(CoordinatorMsg::ToggleKeyboardOutput(enable))
+                        .unwrap();
+                    println!("Toggled keyboard output to: {}", enable);
+                    self.keyboard_output_enabled = enable;
                 } else {
                     self.status_text = "Core not ready yet".to_string();
                 }

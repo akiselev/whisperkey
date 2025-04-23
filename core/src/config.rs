@@ -15,6 +15,8 @@ pub struct Settings {
     pub vad_mode: VadMode,
     pub vad_energy_threshold: f32, // Energy threshold for VAD (0.0 to 1.0)
     pub silence_threshold_ms: u32, // Time in ms to consider silence
+    pub enable_keyboard_output: bool, // Enable keyboard output typing
+    pub keyboard_output_delay_ms: u32, // Delay before typing begins
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
@@ -45,6 +47,8 @@ impl Default for Settings {
             vad_mode: VadMode::Quality,
             vad_energy_threshold: 0.01, // Default threshold (lower values are more sensitive)
             silence_threshold_ms: 1000, // 1 second of silence
+            enable_keyboard_output: false, // Disabled by default for safety
+            keyboard_output_delay_ms: 500, // 500ms delay by default
         }
     }
 }

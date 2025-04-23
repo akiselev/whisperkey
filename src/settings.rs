@@ -19,7 +19,7 @@ pub fn show_settings_dialog(parent: &Window) -> bool {
     dialog.set_title(Some("Settings"));
     dialog.set_modal(true);
     dialog.set_default_width(400);
-    dialog.set_default_height(450);
+    dialog.set_default_height(500); // Increased height for new settings
     dialog.set_transient_for(Some(parent));
 
     // Add cancel and save buttons
@@ -144,6 +144,48 @@ pub fn show_settings_dialog(parent: &Window) -> bool {
     silence_box.append(&silence_spin);
     content_area.append(&silence_box);
 
+    // Keyboard Output Section Header
+    let keyboard_section_label = Label::new(Some("Keyboard Output"));
+    keyboard_section_label.set_halign(gtk4::Align::Start);
+    keyboard_section_label.set_margin_top(12);
+    keyboard_section_label.set_margin_bottom(6);
+    content_area.append(&keyboard_section_label);
+
+    // Separator after section header
+    let keyboard_separator = gtk4::Separator::new(gtk4::Orientation::Horizontal);
+    keyboard_separator.set_margin_bottom(12);
+    content_area.append(&keyboard_separator);
+
+    // Keyboard Output Checkbox
+    let keyboard_check = CheckButton::with_label("Enable Keyboard Output (simulates typing)");
+    keyboard_check.set_active(settings.enable_keyboard_output);
+    keyboard_check.set_margin_bottom(6);
+    content_area.append(&keyboard_check);
+
+    // Delay before typing
+    let delay_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    delay_box.set_margin_bottom(12);
+    delay_box.set_margin_start(24); // Indent
+
+    let delay_label = Label::new(Some("Delay before typing (ms):"));
+    delay_label.set_halign(gtk4::Align::Start);
+    delay_box.append(&delay_label);
+
+    let delay_spin = SpinButton::with_range(0.0, 5000.0, 100.0);
+    delay_spin.set_value(settings.keyboard_output_delay_ms as f64);
+    delay_spin.set_margin_start(6);
+    delay_box.append(&delay_spin);
+    content_area.append(&delay_box);
+
+    // Warning label for keyboard output
+    let warning_label = Label::new(Some("Warning: Enabling keyboard output will type the transcribed text into any active application."));
+    warning_label.set_margin_start(24);
+    warning_label.set_margin_bottom(12);
+    warning_label.set_wrap(true);
+    warning_label.set_width_chars(40);
+    content_area.add_css_class("warning");
+    content_area.append(&warning_label);
+
     // Handle VAD checkbox change
     let vad_mode_box_clone = vad_mode_box.clone();
     let energy_box_clone = energy_box.clone();
@@ -155,10 +197,18 @@ pub fn show_settings_dialog(parent: &Window) -> bool {
         silence_box_clone.set_sensitive(enabled);
     });
 
+    // Handle keyboard output checkbox change
+    let delay_box_clone = delay_box.clone();
+    keyboard_check.connect_toggled(move |check| {
+        let enabled = check.is_active();
+        delay_box_clone.set_sensitive(enabled);
+    });
+
     // Initialize sensitivity
     vad_mode_box.set_sensitive(settings.enable_vad);
     energy_box.set_sensitive(settings.enable_vad);
     silence_box.set_sensitive(settings.enable_vad);
+    delay_box.set_sensitive(settings.enable_keyboard_output);
 
     // Handle browse button click
     let model_path_entry_clone = model_path_entry.clone();
@@ -201,6 +251,8 @@ pub fn show_settings_dialog(parent: &Window) -> bool {
     let vad_mode_combo_for_response = vad_mode_combo.clone();
     let energy_spin_for_response = energy_spin.clone();
     let silence_spin_for_response = silence_spin.clone();
+    let keyboard_check_for_response = keyboard_check.clone();
+    let delay_spin_for_response = delay_spin.clone();
     let settings_clone = settings.clone();
 
     dialog.connect_response(move |dialog, response| {
@@ -233,6 +285,10 @@ pub fn show_settings_dialog(parent: &Window) -> bool {
 
             // Silence threshold
             new_settings.silence_threshold_ms = silence_spin_for_response.value() as u32;
+
+            // Keyboard output settings
+            new_settings.enable_keyboard_output = keyboard_check_for_response.is_active();
+            new_settings.keyboard_output_delay_ms = delay_spin_for_response.value() as u32;
 
             // Save the settings
             if let Err(e) = save_config(&new_settings) {

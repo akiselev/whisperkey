@@ -6,8 +6,12 @@ use crate::{
     audio_capture::AudioCaptureActor,
     audio_processor::AudioProcessorActor,
     config::{self, Settings},
+    keyboard_output::KeyboardOutputActor,
     transcriber::TranscriberActor,
-    types::{AppOutput, AudioCaptureMsg, AudioProcessorMsg, CoordinatorMsg, TranscriberMsg},
+    types::{
+        AppOutput, AudioCaptureMsg, AudioProcessorMsg, CoordinatorMsg, KeyboardOutputMsg,
+        TranscriberMsg,
+    },
 };
 
 pub struct Coordinator {
@@ -19,6 +23,7 @@ pub struct CoordinatorState {
     audio_capture: Option<ActorRef<AudioCaptureMsg>>,
     audio_processor: Option<ActorRef<AudioProcessorMsg>>,
     transcriber: Option<ActorRef<TranscriberMsg>>,
+    keyboard_output: Option<ActorRef<KeyboardOutputMsg>>,
     sample_rate: u32,      // Add sample rate for transcriber
     config: Arc<Settings>, // Configuration loaded from file
 }
@@ -102,6 +107,20 @@ impl Actor for Coordinator {
             ))
         })?;
 
+        // Spawn the keyboard output actor
+        let (keyboard_output, _) = Actor::spawn(
+            None,
+            KeyboardOutputActor {},
+            (myself.clone(), config.clone()),
+        )
+        .await
+        .map_err(|e| {
+            ActorProcessingErr::from(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to start keyboard output actor: {}", e),
+            ))
+        })?;
+
         // Send initial status to UI
         (ui_sender)(AppOutput::UpdateStatus("Initialized".to_string()));
 
@@ -111,6 +130,7 @@ impl Actor for Coordinator {
             audio_capture: Some(audio_capture),
             audio_processor: Some(audio_processor),
             transcriber: Some(transcriber),
+            keyboard_output: Some(keyboard_output),
             sample_rate,
             config,
         })
@@ -177,7 +197,15 @@ impl Actor for Coordinator {
                 tracing::info!("Received transcription result: {}", transcription.0);
 
                 // Forward to UI
-                (state.ui_sender)(AppOutput::UpdateTranscription(transcription.0));
+                (state.ui_sender)(AppOutput::UpdateTranscription(transcription.0.clone()));
+
+                // If keyboard output is enabled, forward to keyboard output actor
+                if state.config.enable_keyboard_output {
+                    if let Some(keyboard_output) = &state.keyboard_output {
+                        keyboard_output
+                            .send_message(KeyboardOutputMsg::TypeText(transcription.0))?;
+                    }
+                }
             }
             CoordinatorMsg::SilenceDetected(is_silence) => {
                 tracing::info!("Silence state changed: {}", is_silence);
@@ -185,6 +213,11 @@ impl Actor for Coordinator {
                     (state.ui_sender)(AppOutput::UpdateStatus("Silence detected".to_string()));
                 } else {
                     (state.ui_sender)(AppOutput::UpdateStatus("Voice detected".to_string()));
+                }
+            }
+            CoordinatorMsg::ToggleKeyboardOutput(enable) => {
+                if let Some(keyboard_output) = &state.keyboard_output {
+                    keyboard_output.send_message(KeyboardOutputMsg::Enable(enable))?;
                 }
             }
         }
@@ -204,6 +237,11 @@ impl Actor for Coordinator {
         // Shutdown transcriber if it's running
         if let Some(transcriber) = &state.transcriber {
             let _ = transcriber.send_message(TranscriberMsg::Shutdown);
+        }
+
+        // Shutdown keyboard output if it's running
+        if let Some(keyboard_output) = &state.keyboard_output {
+            let _ = keyboard_output.send_message(KeyboardOutputMsg::Shutdown);
         }
 
         tracing::info!("Coordinator stopped");

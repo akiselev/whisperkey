@@ -18,6 +18,14 @@ pub enum AudioProcessorMsg {
     Shutdown,
 }
 
+// Commands for the KeyboardOutputActor
+#[derive(Debug)]
+pub enum KeyboardOutputMsg {
+    TypeText(String),
+    Enable(bool),
+    Shutdown,
+}
+
 // Messages related to the AppCoordinator
 #[derive(Debug)]
 pub enum CoordinatorMsg {
@@ -28,6 +36,7 @@ pub enum CoordinatorMsg {
     UpdateStatus(String),   // For internal status updates
     TranscriptionResult(FinalTranscription), // From transcriber
     SilenceDetected(bool),  // Silence state change from VAD
+    ToggleKeyboardOutput(bool), // Enable/disable keyboard output
 }
 
 // For UI updates

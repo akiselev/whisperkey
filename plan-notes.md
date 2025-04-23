@@ -377,3 +377,63 @@
 - Option to revert to WebRTC's full audio processing module for more advanced features.
 - Ability to save and load audio processing presets for different environments.
 - Visual indicators in the UI to show VAD status and audio energy levels.
+
+# Phase 8 Implementation Notes (Keyboard Output)
+
+## 1. Keyboard Output Actor Implementation
+
+- Created a new `KeyboardOutputActor` to handle simulated keyboard typing using the Enigo library.
+- Implemented in `core/src/keyboard_output.rs` with a full Ractor actor model implementation.
+- Key features:
+  - `TypeText` method that uses Enigo to simulate keyboard typing of transcribed text.
+  - Configurable delay before typing to allow users to prepare their application.
+  - Safety mechanisms including disabled-by-default setting.
+  - Status updates to the coordinator for user feedback.
+
+## 2. Message Types and Coordination
+
+- Added `KeyboardOutputMsg` enum to the type system with:
+  - `TypeText(String)` for sending text to be typed
+  - `Enable(bool)` for toggling keyboard output on/off
+  - `Shutdown` for clean actor termination
+- Enhanced `CoordinatorMsg` with `ToggleKeyboardOutput(bool)` to control keyboard output.
+- Updated the coordinator to:
+  - Spawn and manage the keyboard output actor
+  - Forward transcription results to keyboard output when enabled
+  - Handle user commands to toggle keyboard output
+
+## 3. Configuration System Enhancement
+
+- Extended the `Settings` struct with new fields:
+  - `enable_keyboard_output`: Boolean to enable/disable keyboard simulation (false by default for safety)
+  - `keyboard_output_delay_ms`: Configurable delay before typing begins (default 500ms)
+- Ensured settings are persisted in the configuration file and properly loaded at startup.
+- Set conservative defaults to prevent accidental typing.
+
+## 4. UI Integration
+
+- Enhanced the settings dialog with a dedicated "Keyboard Output" section:
+  - Checkbox to enable/disable keyboard output
+  - Numeric spinner to configure typing delay
+  - Warning label about the implications of enabling keyboard output
+- Added a real-time toggle in the main UI:
+  - Checkbox to enable/disable keyboard output without opening settings
+  - Warning label for user awareness
+  - Live state reflection between UI and core
+
+## 5. Safety Considerations
+
+- Implemented multiple safety measures:
+  - Keyboard output is disabled by default
+  - Clear warnings in the UI about the consequences
+  - Confirmation required via settings and toggle
+  - Adjustable delay to prepare the target application
+  - Status messages to indicate when typing occurs
+
+## 6. Notes on Implementation
+
+- The Enigo library provides cross-platform keyboard simulation capabilities.
+- A separate thread for keyboard control helps prevent UI freezing during typing.
+- Coordination between transcription and keyboard output required careful timing.
+- The implementation preserves the actor model architecture, maintaining isolation between components.
+- All actions are user-initiated with clear feedback.
