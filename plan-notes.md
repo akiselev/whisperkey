@@ -136,3 +136,66 @@
 - Audio data is sent as raw f32 samples in `AudioChunk` messages.
 - The stream is properly cleaned up when stopped.
 - In Phase 4, audio chunks will be forwarded to the transcriber process.
+
+# Phase 4 Implementation Notes (Stub Transcriber Process & IPC Client)
+
+## 1. IPC Types and Dependencies
+
+- Added `serde` and `serde_json` dependencies to both `core` and `transcriber` crates.
+- Defined IPC types in `core/src/types.rs`:
+  - `IpcAudioChunk` with `samples` and `sample_rate` fields
+  - `IpcTranscriptionResult` with `text`, `is_final`, and `confidence` fields
+- Added message type `TranscriberMsg` with variants for processing audio and shutdown
+- Added `CoordinatorMsg::TranscriptionResult` for passing results back to the UI
+- Added `AppOutput::UpdateTranscription` for displaying results in the UI
+
+## 2. Transcriber Stub Implementation
+
+- Implemented `transcriber/src/main.rs` with basic JSON IPC:
+  - Reads JSON lines from stdin, parses as `IpcAudioChunk`
+  - Generates dummy transcription results (`Stub transcription #N`) every 50 chunks
+  - Serializes results as JSON and writes to stdout
+  - Proper error handling and logging
+
+## 3. Transcriber Actor Implementation
+
+- Created `core/src/transcriber.rs` with the `TranscriberActor` implementation:
+  - Spawns the transcriber process with `cargo run --package transcriber`
+  - Creates separate threads for stdin (sending chunks) and stdout (receiving results)
+  - Converts `AudioChunk` to `IpcAudioChunk` with proper sample rate
+  - Parses transcription results and forwards them to the coordinator
+  - Proper error handling, shutdown logic, and cleanup
+
+## 4. Coordinator Integration
+
+- Updated `core/src/coordinator.rs` to include the transcriber:
+  - Added `transcriber` field to `CoordinatorState`
+  - Spawns the transcriber actor in `pre_start`
+  - Forwards audio chunks to the transcriber
+  - Handles transcription results and forwards them to the UI
+  - Added proper cleanup in `post_stop`
+
+## 5. UI Integration
+
+- Enhanced the UI in `src/main.rs`:
+  - Added a `transcription_text` field to store the current transcription
+  - Added a scrollable text view to display transcription results
+  - Improved the layout with horizontal button arrangement
+  - Added handler for `AppOutput::UpdateTranscription`
+  - Used thread-local storage to communicate with the text view
+
+## 6. Error Handling
+
+- Added proper error types and handling throughout the pipeline
+- Used `thiserror` for error definitions
+- Added status updates for error conditions
+- Graceful handling of process and communication failures
+
+## 7. Notes
+
+- The IPC pipeline is now fully implemented:
+  - Audio capture → Coordinator → Transcriber Actor → Transcriber Process → Results → UI
+- The transcriber process runs as a separate executable, communicating via stdin/stdout
+- JSON is used for IPC serialization
+- The UI now shows both status updates and transcription results
+- Dummy/stub transcription will be replaced with real Vosk integration in Phase 5

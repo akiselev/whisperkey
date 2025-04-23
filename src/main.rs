@@ -12,11 +12,13 @@ enum AppInput {
     StopListening,
     ProcessOutput(AppOutput),
     UpdateCoreHandles,
+    UpdateTextBuffer(String),
 }
 
 struct AppModel {
     core_handles: Option<CoreHandles>,
     status_text: String,
+    transcription_text: String,
 }
 
 #[relm4::component]
@@ -33,6 +35,7 @@ impl SimpleComponent for AppModel {
         let model = Self {
             core_handles: None,
             status_text: "Starting...".to_string(),
+            transcription_text: "".to_string(),
         };
 
         // Setup a background worker to receive messages from the core
@@ -82,29 +85,67 @@ impl SimpleComponent for AppModel {
 
     view! {
         gtk::Window {
-            set_title: Some("WhisperKey Phase 2 Test Shell"),
-            set_default_width: 400,
-            set_default_height: 200,
+            set_title: Some("WhisperKey Phase 4 Test Shell"),
+            set_default_width: 600,
+            set_default_height: 400,
 
             gtk::Box {
                 set_orientation: gtk::Orientation::Vertical,
                 set_spacing: 12,
                 set_margin_all: 24,
+
+                // Status area
                 gtk::Label {
                     #[watch]
                     set_label: &model.status_text,
+                    set_margin_bottom: 12,
                 },
-                gtk::Button {
-                    set_label: "Test Core",
-                    connect_clicked => AppInput::TestCore,
+
+                // Control buttons
+                gtk::Box {
+                    set_orientation: gtk::Orientation::Horizontal,
+                    set_spacing: 8,
+                    set_margin_bottom: 20,
+
+                    gtk::Button {
+                        set_label: "Test Core",
+                        connect_clicked => AppInput::TestCore,
+                    },
+                    gtk::Button {
+                        set_label: "Start Listening",
+                        connect_clicked => AppInput::StartListening,
+                    },
+                    gtk::Button {
+                        set_label: "Stop Listening",
+                        connect_clicked => AppInput::StopListening,
+                    },
                 },
-                gtk::Button {
-                    set_label: "Start Listening",
-                    connect_clicked => AppInput::StartListening,
+
+                // Transcription area
+                gtk::Label {
+                    set_label: "Transcription Results:",
+                    set_halign: gtk::Align::Start,
+                    set_margin_bottom: 6,
                 },
-                gtk::Button {
-                    set_label: "Stop Listening",
-                    connect_clicked => AppInput::StopListening,
+
+                gtk::ScrolledWindow {
+                    set_hexpand: true,
+                    set_vexpand: true,
+                    set_min_content_height: 200,
+
+                    gtk::TextView {
+                        set_editable: false,
+                        set_cursor_visible: false,
+                        set_wrap_mode: gtk::WrapMode::Word,
+
+                        // Update text when transcription changes
+                        #[watch]
+                        set_buffer: Some(&{
+                            let buffer = gtk::TextBuffer::new(None::<&gtk::TextTagTable>);
+                            buffer.set_text(&model.transcription_text);
+                            buffer
+                        }),
+                    },
                 },
             }
         }
@@ -146,14 +187,16 @@ impl SimpleComponent for AppModel {
                     self.status_text = "Core not ready yet".to_string();
                 }
             }
-            AppInput::ProcessOutput(output) => {
-                match output {
-                    AppOutput::UpdateStatus(status) => {
-                        self.status_text = status;
-                        println!("Status updated: {}", self.status_text);
-                    } // Handle other output types as they're added
+            AppInput::ProcessOutput(output) => match output {
+                AppOutput::UpdateStatus(status) => {
+                    self.status_text = status;
+                    println!("Status updated: {}", self.status_text);
                 }
-            }
+                AppOutput::UpdateTranscription(text) => {
+                    self.transcription_text = text.clone();
+                    println!("Transcription updated: {}", text);
+                }
+            },
             AppInput::UpdateCoreHandles => {
                 // Get the core handles from the thread-local
                 thread_local! {
@@ -167,6 +210,9 @@ impl SimpleComponent for AppModel {
                     }
                 });
             }
+            AppInput::UpdateTextBuffer(text) => {
+                self.transcription_text = text;
+            }
         }
     }
 }
@@ -174,7 +220,7 @@ impl SimpleComponent for AppModel {
 fn main() {
     tracing_subscriber::fmt::init();
 
-    let app = RelmApp::new("org.example.whisperkey_phase2_test");
+    let app = RelmApp::new("org.example.whisperkey_phase4_test");
     app.run::<AppModel>(());
 
     println!("Finished.");

@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use crate::{
     audio_capture::AudioCaptureActor,
-    types::{AppOutput, AudioCaptureMsg, CoordinatorMsg},
+    transcriber::TranscriberActor,
+    types::{AppOutput, AudioCaptureMsg, CoordinatorMsg, TranscriberMsg},
 };
 
 pub struct Coordinator {
@@ -13,6 +14,8 @@ pub struct Coordinator {
 pub struct CoordinatorState {
     ui_sender: Arc<dyn Fn(AppOutput) + Send + Sync + 'static>,
     audio_capture: Option<ActorRef<AudioCaptureMsg>>,
+    transcriber: Option<ActorRef<TranscriberMsg>>,
+    sample_rate: u32, // Add sample rate for transcriber
 }
 
 #[ractor::async_trait]
@@ -28,6 +31,9 @@ impl Actor for Coordinator {
     ) -> Result<Self::State, ActorProcessingErr> {
         tracing::info!("Coordinator actor started");
 
+        // Use a fixed sample rate for now - could be configurable later
+        let sample_rate = 16000; // 16 kHz is common for speech recognition
+
         // Spawn the audio capture actor
         let (audio_capture, _) = Actor::spawn(None, AudioCaptureActor {}, myself.clone())
             .await
@@ -38,6 +44,17 @@ impl Actor for Coordinator {
                 ))
             })?;
 
+        // Spawn the transcriber actor
+        let (transcriber, _) =
+            Actor::spawn(None, TranscriberActor {}, (myself.clone(), sample_rate))
+                .await
+                .map_err(|e| {
+                    ActorProcessingErr::from(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("Failed to start transcriber actor: {}", e),
+                    ))
+                })?;
+
         // Send initial status to UI
         (ui_sender)(AppOutput::UpdateStatus("Initialized".to_string()));
 
@@ -45,6 +62,8 @@ impl Actor for Coordinator {
         Ok(CoordinatorState {
             ui_sender,
             audio_capture: Some(audio_capture),
+            transcriber: Some(transcriber),
+            sample_rate,
         })
     }
 
@@ -93,14 +112,36 @@ impl Actor for Coordinator {
                     tracing::debug!("Coordinator: Received audio chunk, size: {}", chunk.0.len());
                 }
 
-                // In Phase 4, we'll forward this to the transcriber process
-                // For now, we just acknowledge receipt
+                // Forward to transcriber if available
+                if let Some(transcriber) = &state.transcriber {
+                    transcriber.send_message(TranscriberMsg::ProcessAudioChunk(chunk))?;
+                }
             }
             CoordinatorMsg::UpdateStatus(status) => {
                 // Forward status updates from actors to the UI
                 (state.ui_sender)(AppOutput::UpdateStatus(status));
             }
+            CoordinatorMsg::TranscriptionResult(transcription) => {
+                tracing::info!("Received transcription result: {}", transcription.0);
+
+                // Forward to UI
+                (state.ui_sender)(AppOutput::UpdateTranscription(transcription.0));
+            }
         }
+        Ok(())
+    }
+
+    async fn post_stop(
+        &self,
+        _myself: ActorRef<Self::Msg>,
+        state: &mut Self::State,
+    ) -> Result<(), ActorProcessingErr> {
+        // Shutdown transcriber if it's running
+        if let Some(transcriber) = &state.transcriber {
+            let _ = transcriber.send_message(TranscriberMsg::Shutdown);
+        }
+
+        tracing::info!("Coordinator stopped");
         Ok(())
     }
 }

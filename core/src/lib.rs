@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 pub mod audio_capture;
 pub mod coordinator;
+pub mod transcriber;
 pub mod types;
 
 pub use coordinator::Coordinator;
