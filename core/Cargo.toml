@@ -11,3 +11,5 @@ whisper-rs = { workspace = true }
 cpal = { workspace = true }
 enigo = { workspace = true }
 clap = { workspace = true }
+stakker = "0.2.12"
+tracing = "0.1"

@@ -19,7 +19,28 @@
 ## 5. Basic System Tray Stub
 - Created `src/tray.rs` as a stub with a placeholder `init_tray()` function.
 
-## Notes
-- All steps from Phase 1 of plan.md have been implemented or stubbed.
-- No actors, audio, or advanced UI logic introduced yet (per plan).
-- Next: For full GTK/Relm4 shell, will need to uncomment/add those dependencies and refactor `main.rs` if strict plan adherence is required.
+
+# Phase 2 Implementation Notes (Stakker & Core Initialization)
+
+## 1. Stakker Setup (`core/`)
+- Added `stakker` and `tracing` as dependencies in `core/Cargo.toml`.
+- Implemented `AppCoordinator` actor with a `CoordinatorMsg` enum and `handle` method for logging receipt of `HandleTest`.
+- Added `CoreHandles` struct and `init_core_actors` function for spawning the coordinator actor.
+
+## 2. Stakker Integration (`src/`)
+- Uncommented/added `relm4` and `gtk4` dependencies in root `Cargo.toml`.
+- Refactored `src/main.rs` to:
+  - Initialize Stakker and core actors.
+  - Store `CoreHandles` in the app model.
+  - Launch a minimal Relm4 GTK window.
+
+## 3. UI→Core Communication
+- Added a "Test Core" button to the GTK window.
+- Defined `AppInput::TestCore` in the UI.
+- On button click, `AppInput::TestCore` is sent to the app model, which calls `cast!` to send `CoordinatorMsg::HandleTest` to the coordinator.
+- Coordinator logs receipt of the message via `tracing`.
+
+## 4. Notes
+- The previous audio/transcription logic in `main.rs` was replaced with the minimal Phase 2 UI/actor shell for strict plan compliance.
+- The GTK/Relm4 shell is now functional and integrated with the actor system.
+- Next: Implement audio capture and pipeline in Phase 3.
