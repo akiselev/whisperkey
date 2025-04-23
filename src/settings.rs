@@ -1,18 +1,23 @@
 use gtk4::prelude::*;
 use gtk4::{
     Button, CheckButton, ComboBoxText, Dialog, Entry, FileChooserAction, FileChooserDialog, Label,
-    Scale, SpinButton, Window,
+    SpinButton, Window,
 };
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 
-use whisperkey_core::{load_config, save_config, Settings, VadMode};
+use whisperkey_core::{config::CommandAction, load_config, save_config, Settings, VadMode};
 
 pub fn show_settings_dialog(parent: &Window) -> bool {
     // Load current settings
-    let settings = load_config().unwrap_or_else(|_| {
-        eprintln!("Failed to load settings");
-        Arc::new(Settings::default())
-    });
+    let settings = Rc::new(RefCell::new(
+        (*load_config().unwrap_or_else(|_| {
+            eprintln!("Failed to load settings");
+            Arc::new(Settings::default())
+        }))
+        .clone(),
+    ));
 
     // Create a new dialog
     let dialog = Dialog::new();
@@ -50,7 +55,7 @@ pub fn show_settings_dialog(parent: &Window) -> bool {
     let model_path_entry = Entry::new();
     model_path_entry.set_hexpand(true);
     model_path_entry.set_placeholder_text(Some("Path to Vosk model directory"));
-    if let Some(path) = &settings.model_path {
+    if let Some(path) = &settings.borrow().model_path {
         model_path_entry.set_text(path);
     }
     inner_box.append(&model_path_entry);
@@ -75,13 +80,13 @@ pub fn show_settings_dialog(parent: &Window) -> bool {
 
     // Noise Reduction Checkbox
     let denoise_check = CheckButton::with_label("Enable Noise Reduction");
-    denoise_check.set_active(settings.enable_denoise);
+    denoise_check.set_active(settings.borrow().enable_denoise);
     denoise_check.set_margin_bottom(6);
     content_area.append(&denoise_check);
 
     // VAD Checkbox
     let vad_check = CheckButton::with_label("Enable Voice Activity Detection (VAD)");
-    vad_check.set_active(settings.enable_vad);
+    vad_check.set_active(settings.borrow().enable_vad);
     vad_check.set_margin_bottom(6);
     content_area.append(&vad_check);
 
@@ -101,7 +106,7 @@ pub fn show_settings_dialog(parent: &Window) -> bool {
     vad_mode_combo.append(Some("very_aggressive"), "Very Aggressive");
 
     // Set the active option based on settings
-    match settings.vad_mode {
+    match settings.borrow().vad_mode {
         VadMode::Quality => vad_mode_combo.set_active_id(Some("quality")),
         VadMode::LowBitrate => vad_mode_combo.set_active_id(Some("low_bitrate")),
         VadMode::Aggressive => vad_mode_combo.set_active_id(Some("aggressive")),
@@ -122,7 +127,7 @@ pub fn show_settings_dialog(parent: &Window) -> bool {
 
     // Use SpinButton for more precise control
     let energy_spin = SpinButton::with_range(0.001, 0.5, 0.001);
-    energy_spin.set_value(settings.vad_energy_threshold as f64);
+    energy_spin.set_value(settings.borrow().vad_energy_threshold as f64);
     energy_spin.set_digits(3); // Show 3 decimal places
     energy_spin.set_margin_start(6);
     energy_box.append(&energy_spin);
@@ -139,7 +144,7 @@ pub fn show_settings_dialog(parent: &Window) -> bool {
     silence_box.append(&silence_label);
 
     let silence_spin = SpinButton::with_range(100.0, 5000.0, 100.0);
-    silence_spin.set_value(settings.silence_threshold_ms as f64);
+    silence_spin.set_value(settings.borrow().silence_threshold_ms as f64);
     silence_spin.set_margin_start(6);
     silence_box.append(&silence_spin);
     content_area.append(&silence_box);
@@ -158,7 +163,7 @@ pub fn show_settings_dialog(parent: &Window) -> bool {
 
     // Keyboard Output Checkbox
     let keyboard_check = CheckButton::with_label("Enable Keyboard Output (simulates typing)");
-    keyboard_check.set_active(settings.enable_keyboard_output);
+    keyboard_check.set_active(settings.borrow().enable_keyboard_output);
     keyboard_check.set_margin_bottom(6);
     content_area.append(&keyboard_check);
 
@@ -172,7 +177,7 @@ pub fn show_settings_dialog(parent: &Window) -> bool {
     delay_box.append(&delay_label);
 
     let delay_spin = SpinButton::with_range(0.0, 5000.0, 100.0);
-    delay_spin.set_value(settings.keyboard_output_delay_ms as f64);
+    delay_spin.set_value(settings.borrow().keyboard_output_delay_ms as f64);
     delay_spin.set_margin_start(6);
     delay_box.append(&delay_spin);
     content_area.append(&delay_box);
@@ -183,8 +188,55 @@ pub fn show_settings_dialog(parent: &Window) -> bool {
     warning_label.set_margin_bottom(12);
     warning_label.set_wrap(true);
     warning_label.set_width_chars(40);
-    content_area.add_css_class("warning");
+    warning_label.add_css_class("warning");
     content_area.append(&warning_label);
+
+    // Commands Section Header
+    let commands_section_label = Label::new(Some("Voice Commands"));
+    commands_section_label.set_halign(gtk4::Align::Start);
+    commands_section_label.set_margin_top(12);
+    commands_section_label.set_margin_bottom(6);
+    content_area.append(&commands_section_label);
+
+    // Separator after section header
+    let commands_separator = gtk4::Separator::new(gtk4::Orientation::Horizontal);
+    commands_separator.set_margin_bottom(12);
+    content_area.append(&commands_separator);
+
+    // Simplified command management - text based
+    let command_info_label =
+        Label::new(Some("Voice commands are defined in the config.toml file."));
+    command_info_label.set_margin_bottom(12);
+    command_info_label.set_wrap(true);
+    command_info_label.set_width_chars(40);
+    content_area.append(&command_info_label);
+
+    // Display existing commands in a text view
+    let commands_info = format!(
+        "Default commands:\n\n{}\n\nCommands can be either Type or Exec and support {{args}} substitution.",
+        settings
+            .borrow()
+            .commands
+            .iter()
+            .map(|(trigger, action)| match action {
+                CommandAction::Type(template) => {
+                    format!("• \"{}\" → Type: {}", trigger, template)
+                }
+                CommandAction::Exec(template) => {
+                    format!("• \"{}\" → Exec: {}", trigger, template)
+                }
+            })
+            .collect::<Vec<String>>()
+            .join("\n")
+    );
+
+    let commands_label = Label::new(Some(&commands_info));
+    commands_label.set_margin_bottom(12);
+    commands_label.set_margin_start(12);
+    commands_label.set_wrap(true);
+    commands_label.set_width_chars(40);
+    commands_label.set_halign(gtk4::Align::Start);
+    content_area.append(&commands_label);
 
     // Handle VAD checkbox change
     let vad_mode_box_clone = vad_mode_box.clone();
@@ -205,10 +257,10 @@ pub fn show_settings_dialog(parent: &Window) -> bool {
     });
 
     // Initialize sensitivity
-    vad_mode_box.set_sensitive(settings.enable_vad);
-    energy_box.set_sensitive(settings.enable_vad);
-    silence_box.set_sensitive(settings.enable_vad);
-    delay_box.set_sensitive(settings.enable_keyboard_output);
+    vad_mode_box.set_sensitive(settings.borrow().enable_vad);
+    energy_box.set_sensitive(settings.borrow().enable_vad);
+    silence_box.set_sensitive(settings.borrow().enable_vad);
+    delay_box.set_sensitive(settings.borrow().enable_keyboard_output);
 
     // Handle browse button click
     let model_path_entry_clone = model_path_entry.clone();
@@ -258,7 +310,8 @@ pub fn show_settings_dialog(parent: &Window) -> bool {
     dialog.connect_response(move |dialog, response| {
         if response == gtk4::ResponseType::Accept {
             // Create a new settings with the updated values
-            let mut new_settings = (*settings_clone).clone();
+            let mut new_settings = settings_clone.borrow().clone();
+
             // Model path
             let model_path_text = model_path_entry_for_response.text().to_string();
             new_settings.model_path = if model_path_text.is_empty() {

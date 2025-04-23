@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 pub mod audio_capture;
 pub mod audio_processor;
+pub mod command;
 pub mod config;
 pub mod coordinator;
 pub mod keyboard_output;
@@ -23,7 +24,7 @@ pub async fn init_core_actors(
     model_path: Option<PathBuf>,
 ) -> Result<CoreHandles, Box<dyn std::error::Error>> {
     // Initialize the coordinator actor
-    let (coordinator, handle) = Actor::spawn(None, Coordinator {}, (ui_sender, model_path))
+    let (coordinator, _handle) = Actor::spawn(None, Coordinator {}, (ui_sender, model_path))
         .await
         .expect("Failed to spawn coordinator actor");
 

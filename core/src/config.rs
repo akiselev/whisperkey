@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -17,6 +18,13 @@ pub struct Settings {
     pub silence_threshold_ms: u32, // Time in ms to consider silence
     pub enable_keyboard_output: bool, // Enable keyboard output typing
     pub keyboard_output_delay_ms: u32, // Delay before typing begins
+    pub commands: HashMap<String, CommandAction>, // Command triggers and actions
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub enum CommandAction {
+    Type(String), // Template for text to type
+    Exec(String), // Template for command to execute
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
@@ -40,6 +48,24 @@ impl From<VadMode> for webrtc_vad::VadMode {
 
 impl Default for Settings {
     fn default() -> Self {
+        let mut commands = HashMap::new();
+
+        // Add some default commands as examples
+        commands.insert(
+            "hello world".to_string(),
+            CommandAction::Type("Hello, World! This was triggered by voice command.".to_string()),
+        );
+
+        commands.insert(
+            "open notepad".to_string(),
+            CommandAction::Exec("notepad.exe".to_string()),
+        );
+
+        commands.insert(
+            "search for".to_string(),
+            CommandAction::Exec("start https://www.google.com/search?q={args}".to_string()),
+        );
+
         Self {
             model_path: None,
             enable_denoise: true,
@@ -49,6 +75,7 @@ impl Default for Settings {
             silence_threshold_ms: 1000, // 1 second of silence
             enable_keyboard_output: false, // Disabled by default for safety
             keyboard_output_delay_ms: 500, // 500ms delay by default
+            commands,
         }
     }
 }

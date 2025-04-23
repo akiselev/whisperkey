@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::{
     audio_capture::AudioCaptureActor,
     audio_processor::AudioProcessorActor,
+    command,
     config::{self, Settings},
     keyboard_output::KeyboardOutputActor,
     transcriber::TranscriberActor,
@@ -199,11 +200,41 @@ impl Actor for Coordinator {
                 // Forward to UI
                 (state.ui_sender)(AppOutput::UpdateTranscription(transcription.0.clone()));
 
-                // If keyboard output is enabled, forward to keyboard output actor
-                if state.config.enable_keyboard_output {
-                    if let Some(keyboard_output) = &state.keyboard_output {
-                        keyboard_output
-                            .send_message(KeyboardOutputMsg::TypeText(transcription.0))?;
+                // Process for commands
+                if let Some(keyboard_output) = &state.keyboard_output {
+                    // Create a function to send messages to the keyboard output actor
+                    let keyboard_sender =
+                        |msg: KeyboardOutputMsg| -> Result<(), Box<dyn std::error::Error>> {
+                            keyboard_output
+                                .send_message(msg)
+                                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+                        };
+
+                    // Check if transcription matches a command
+                    match command::process_command(
+                        &transcription.0,
+                        &state.config.commands,
+                        keyboard_sender,
+                    ) {
+                        Ok(Some(_)) => {
+                            // Command was executed, do nothing further
+                            tracing::info!("Command was executed");
+                        }
+                        Ok(None) => {
+                            // No command matched, type the text if keyboard output is enabled
+                            if state.config.enable_keyboard_output {
+                                keyboard_output
+                                    .send_message(KeyboardOutputMsg::TypeText(transcription.0))?;
+                            }
+                        }
+                        Err(e) => {
+                            // Error executing command
+                            tracing::error!("Error executing command: {}", e);
+                            (state.ui_sender)(AppOutput::UpdateStatus(format!(
+                                "Error executing command: {}",
+                                e
+                            )));
+                        }
                     }
                 }
             }

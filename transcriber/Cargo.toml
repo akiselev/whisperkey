@@ -3,6 +3,10 @@ name = "transcriber"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "transcriber"
+path = "src/main.rs"
+
 [dependencies]
 tracing = "0.1"
 tracing-subscriber = "0.3"
