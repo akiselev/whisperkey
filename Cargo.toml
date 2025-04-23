@@ -18,7 +18,9 @@ whisperkey_core = { workspace = true }
 hound = "3.5"
 nnnoiseless = "0.5.0"
 tracing-subscriber = "0.3.19"
-stakker = "0.2.12"
+ractor = "0.13"
+tokio = { version = "1", features = ["full"] }
+flume = "0.10"
 
 
 [workspace.dependencies]

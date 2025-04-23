@@ -1,70 +1,80 @@
-use stakker::{Actor, ActorOwn, Stakker};
+use ractor::{Actor, ActorProcessingErr, ActorRef};
+use std::sync::Arc;
 
-pub mod audio_capture;
 pub mod types;
 
-use types::CoordinatorMsg;
-
-// Coordinator message enum (REMOVED - now in types.rs)
-// pub enum CoordinatorMsg {
-//     HandleTest,
-// }
+pub use types::{AppOutput, AudioCaptureMsg, CoordinatorMsg};
 
 // Coordinator actor
-pub struct AppCoordinator;
+pub struct Coordinator {
+    // Will hold references to other actors
+}
 
-impl AppCoordinator {
-    // Add an init function as required by the actor! macro
-    pub fn init(_: stakker::CX![]) -> Option<Self> {
-        Some(Self)
+// App State for Coordinator
+pub struct CoordinatorState {
+    // Will hold actor state
+}
+
+// Define the Actor implementation for Coordinator
+#[ractor::async_trait]
+impl Actor for Coordinator {
+    type Msg = CoordinatorMsg;
+    type State = CoordinatorState;
+    type Arguments = Arc<dyn Fn(AppOutput) + Send + Sync + 'static>;
+
+    async fn pre_start(
+        &self,
+        myself: ActorRef<Self::Msg>,
+        ui_sender: Self::Arguments,
+    ) -> Result<Self::State, ActorProcessingErr> {
+        tracing::info!("Coordinator actor started");
+
+        // Send initial status to UI
+        ui_sender(AppOutput::UpdateStatus("Initialized".to_string()));
+
+        // Return initial state
+        Ok(CoordinatorState {})
     }
 
-    // Example handler function (needs to be adapted based on actual usage)
-    pub fn handle_test(&mut self, _: stakker::CX![]) {
-        tracing::info!("Coordinator received HandleTest message");
-    }
-
-    // Add new handlers for Start/Stop Listening
-    pub fn handle_start_listening(&mut self, cx: stakker::CX![]) {
-        tracing::info!("Coordinator: StartListening received");
-        // TODO: Forward command to AudioCaptureActor
-    }
-
-    pub fn handle_stop_listening(&mut self, cx: stakker::CX![]) {
-        tracing::info!("Coordinator: StopListening received");
-        // TODO: Forward command to AudioCaptureActor
-    }
-
-    // Add handler for incoming audio chunks
-    pub fn handle_internal_audio_chunk(&mut self, cx: stakker::CX![], chunk: types::AudioChunk) {
-        tracing::debug!("Coordinator: Received audio chunk, size: {}", chunk.0.len());
-        // TODO: Forward chunk to TranscriptionClientActor (Phase 4)
-        // TODO: Send status updates to UI
+    async fn handle(
+        &self,
+        myself: ActorRef<Self::Msg>,
+        message: Self::Msg,
+        state: &mut Self::State,
+    ) -> Result<(), ActorProcessingErr> {
+        match message {
+            CoordinatorMsg::HandleTest => {
+                tracing::info!("Coordinator received HandleTest message");
+            }
+            CoordinatorMsg::StartListening => {
+                tracing::info!("Coordinator: StartListening received");
+                // TODO: Forward command to AudioCaptureActor
+            }
+            CoordinatorMsg::StopListening => {
+                tracing::info!("Coordinator: StopListening received");
+                // TODO: Forward command to AudioCaptureActor
+            }
+            CoordinatorMsg::AudioChunk(chunk) => {
+                tracing::debug!("Coordinator: Received audio chunk, size: {}", chunk.0.len());
+                // TODO: Forward chunk to TranscriptionClientActor (Phase 4)
+            }
+        }
+        Ok(())
     }
 }
 
 pub struct CoreHandles {
-    pub coordinator: ActorOwn<AppCoordinator>,
+    pub coordinator: ActorRef<CoordinatorMsg>,
 }
 
-pub fn init_core_actors(stakker: &mut Stakker) -> CoreHandles {
-    // Use the actor! macro to create the actor instance
-    // Assuming no return handler is needed for now (ret_nop!)
-    let coordinator = stakker::actor!(
-        stakker,
-        AppCoordinator::init(),
-        stakker::ret_nop!(),
-        |cx, msg| {
-            match msg {
-                CoordinatorMsg::HandleTest => cx.this_mut().handle_test(cx),
-                CoordinatorMsg::StartListening => cx.this_mut().handle_start_listening(cx),
-                CoordinatorMsg::StopListening => cx.this_mut().handle_stop_listening(cx),
-                CoordinatorMsg::InternalAudioChunk(chunk) => {
-                    cx.this_mut().handle_internal_audio_chunk(cx, chunk)
-                }
-            }
-        }
-    );
+pub async fn init_core_actors(
+    ui_sender: Arc<dyn Fn(AppOutput) + Send + Sync + 'static>,
+) -> CoreHandles {
+    // Spawn coordinator actor
+    let (coordinator, _handle) = Actor::spawn(None, Coordinator {}, ui_sender)
+        .await
+        .expect("Failed to start coordinator actor");
+
     CoreHandles { coordinator }
 }
 

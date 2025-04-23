@@ -9,6 +9,6 @@ whisper-rs = { workspace = true }
 cpal = { workspace = true }
 enigo = { workspace = true }
 clap = { workspace = true }
-stakker = "0.2.12"
+ractor = "0.13"
 tracing = "0.1"
 thiserror = "1.0"

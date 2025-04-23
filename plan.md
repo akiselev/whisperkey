@@ -1,10 +1,10 @@
 **Assumptions:**
 
 1.  **UI Framework:** **GTK4-rs / Relm4** for the main application window and UI elements (Root Crate: `src/`).
-2.  **Core Logic:** **Stakker** actors, audio pipeline, state management, command handling, IPC client, activation logic, configuration handling resides in the **`core/`** library crate.
+2.  **Core Logic:** **Ractor** actors, audio pipeline, state management, command handling, IPC client, activation logic, configuration handling resides in the **`core/`** library crate.
 3.  **System Tray:** **`tauri-plugin-system-tray`** integrated in the Root Crate (`src/`), interacting with the `core` crate.
-4.  **Actor Framework:** **Stakker** used within the `core/` crate.
-5.  **Concurrency:** Standard **multi-threading** (`std::thread`, `std::sync::mpsc`) used within the `core/` crate.
+4.  **Actor Framework:** **Ractor** used within the `core/` crate.
+5.  **Concurrency:** Standard **multi-threading** (`std::thread`, `std::sync::mpsc`) used within the `core/` crate alongside Ractor actors.
 6.  **Transcription Backend:** **Vosk-rs** running in a separate process (`transcriber/` crate).
 7.  **Transcription Process IPC:** stdin/stdout using **JSON Lines** initially.
 8.  **Wake Word Engine:** A thread-compatible library (e.g., `porcupine-rs`) integrated in `core/`.
@@ -17,7 +17,7 @@
     - `whisperkey/`
       - `Cargo.toml`: Workspace (`members = [".", "core", "transcriber"]`). Root depends on `core`.
       - `src/`: Main binary - GTK/Relm4 UI, system tray, `main`.
-      - `core/`: Library - Stakker actors, logic, audio, state, config.
+      - `core/`: Library - Ractor actors, logic, audio, state, config.
       - `transcriber/`: Binary - Vosk process.
 
 ---
@@ -28,7 +28,7 @@
 - **Tasks:**
   1.  **Workspace Setup:** Create `whisperkey/Cargo.toml` defining the workspace.
   2.  **Root Crate (`src/`) Setup:** Add deps (`gtk4`, `relm4`, `tracing`, `tracing-subscriber`, `tauri-plugin-system-tray`, `whisperkey-core`). Basic `main.rs` with GTK/Relm4 structure, empty `AppModel`, `AppWidgets`, empty `AppInput`/`AppOutput`. Run Relm4 app.
-  3.  **Core Crate (`core/`) Setup:** `[lib]`. Add deps (`stakker`, `tracing`). Placeholder function `core_hello()`.
+  3.  **Core Crate (`core/`) Setup:** `[lib]`. Add deps (`ractor = "0.13"`, `tracing`). Placeholder function `core_hello()`.
   4.  **Transcriber Crate (`transcriber/`) Setup:** Add deps (`tracing`, `tracing-subscriber`). `main.rs` logs start message.
   5.  **Basic System Tray (`src/tray.rs`):** Use `tauri-plugin-system-tray` for icon and basic Quit menu item. Handle threading.
   6.  **Documentation:** `README.md`: Structure, deps, build command.
@@ -36,56 +36,66 @@
 
 ---
 
-**Phase 2: Stakker & Core Initialization**
+**Phase 2: Ractor & Core Initialization**
 
-- **Goal:** Introduce Stakker, define minimal actors in `core`, initialize them from `src`, establish UI -> Core message passing.
+- **Goal:** Set up Ractor actors in `core`, initialize them from `src`, establish UI -> Core message passing.
 - **Tasks:**
-  1.  **Stakker Setup (`core/src/lib.rs`):** Define `AppCoordinator` actor placeholder. Define `init_core_actors` function returning `CoreHandles { coordinator: Actor<AppCoordinator> }`.
-  2.  **Stakker Integration (`src/main.rs`):** Create `Stakker` instance. Call `core::init_core_actors`. Store `CoreHandles`. Ensure Stakker runs (e.g., driven by GTK idle loop).
+  1.  **Ractor Setup (`core/src/lib.rs`):** Define `Coordinator` actor struct and message types. Implement the `Actor` trait for `Coordinator`. Define `init_core_actors` function returning `CoreHandles { coordinator: ActorRef<CoordinatorMsg> }`.
+  2.  **Ractor Integration (`src/main.rs`):** Create a handle to the coordinator actor by calling `core::init_core_actors`. Store `CoreHandles`.
   3.  **Basic UI->Core Communication (`src/ui.rs`, `core/src/lib.rs`):**
       - Add "Test Core" GTK button (`src/`).
       - Define `AppInput::TestCore` (`src/`).
       - Define `CoordinatorMsg::HandleTest` (`core/`).
       - Button click handler (`src/`) sends `AppInput::TestCore`.
-      - `AppModel::update` (`src/`) handles `AppInput::TestCore`: use `core_handles.coordinator.defer_msg(CoordinatorMsg::HandleTest);` (using `defer_msg` as it originates from UI thread).
-      - `AppCoordinator::handle_msg` (`core/`) handles `CoordinatorMsg::HandleTest`: logs message.
-  4.  **Documentation:** Explain Stakker initialization, UI-to-Core message flow using `defer_msg`.
+      - `AppModel::update` (`src/`) handles `AppInput::TestCore`: use `core_handles.coordinator.send_message(CoordinatorMsg::HandleTest).unwrap();` (using `send_message` to communicate with the actor).
+      - `Coordinator::handle` (`core/`) processes `CoordinatorMsg::HandleTest`: logs message.
+  4.  **Documentation:** Explain Ractor initialization, UI-to-Core message flow.
   5.  **Testing:** Manual: `cargo run`. Click "Test Core". Verify coordinator log message appears.
 
 ---
 
 **Phase 3: Audio Capture Implementation**
 
-- **Goal:** Implement `AudioCaptureActor` in `core` using `cpal` and `std::thread`, send raw audio chunks via `mpsc`.
+- **Goal:** Implement `AudioCaptureActor` in `core` using `cpal` and `std::thread`, send raw audio chunks to the coordinator.
 - **Tasks:**
-
-2. **Audio Types (`core/src/types.rs`):** `AudioChunk(Vec<f32>)`, `AudioCaptureCmd { Start, Stop }`.
-3. **Audio Capture Actor (`core/src/audio_capture.rs`):** Implement `Actor`. `init` takes a `Deferrer` or `External<CoordinatorMsg>` to communicate back to coordinator. `handle_msg` handles `AudioCaptureCmd::Start`/`Stop`. `Start` spawns `std::thread` for `cpal` stream callback. Audio callback sends chunks back to coordinator using the deferrer/external.
-4. **Coordinator Integration (`core/src/coordinator.rs`):** - `AppCoordinatorActor`: - `init`: Create `Deferrer` using `stakker.deferrer()` or external handle using `stakker.external()`. Spawn `AudioCaptureActor`, pass sender. Store `Actor<AudioCaptureActor>` handle. - Define `CoordinatorMsg { StartListening, StopListening, InternalAudioChunk(AudioChunk) }`. - Handle `StartListening`/`StopListening`: `self.audio_capture_actor.send_msg(AudioCaptureCmd::Start)` (using `send_msg` as it's actor-to-actor within handler). - Handle `InternalAudioChunk`: Log arrival.
-5. **UI Integration (`src/ui.rs`):** - Add "Start/Stop Listening" buttons, Status label. - Define `AppInput { StartListening, StopListening }`, `AppOutput { UpdateStatus(String) }`. - Button clicks send `AppInput`. - `AppModel::update` handles inputs: `core_handles.coordinator.defer_msg(CoordinatorMsg::StartListening)`. - Coordinator (`core`) sends status updates back to UI (via a channel or Relm4 sender passed during init). UI thread receives updates and handles `AppOutput::UpdateStatus`.
-6. **Documentation:** Explain `AudioCaptureActor`, threading, message flow (UI `defer_msg` -> Coord -> Coord `send_msg` -> Capture -> Thread with Deferrer `defer_msg` -> Coord).
-7. **Testing:** Manual: `cargo run`. Click Start/Stop. Verify status updates, logs show chunk arrivals at coordinator.
+  1.  **Audio Types (`core/src/types.rs`):** `AudioChunk(Vec<f32>)`, `AudioCaptureMsg { Start, Stop, Shutdown }`.
+  2.  **Audio Capture Actor (`core/src/audio_capture.rs`):** Implement `Actor` trait for `AudioCapture`. State will hold `Option<JoinHandle>` for the capture thread. `pre_start` initializes the actor. `handle` processes `AudioCaptureMsg::Start`/`Stop`/`Shutdown`. `Start` spawns `std::thread` for `cpal` stream callback. Audio callback sends chunks back to coordinator using `ActorRef::send_message`.
+  3.  **Coordinator Integration (`core/src/coordinator.rs`):**
+  - Define `CoordinatorMsg { StartListening, StopListening, AudioChunk(AudioChunk) }`.
+  - Implement `Actor` trait for `Coordinator`:
+    - `pre_start`: Spawn `AudioCaptureActor` using `Actor::spawn`, store `ActorRef<AudioCaptureMsg>`.
+    - `handle`: Process `StartListening`/`StopListening`: `self.audio_capture_actor.send_message(AudioCaptureMsg::Start/Stop).unwrap()`.
+    - Handle `AudioChunk`: Log arrival.
+  4.  **UI Integration (`src/ui.rs`):**
+  - Add "Start/Stop Listening" buttons, Status label.
+  - Define `AppInput { StartListening, StopListening }`, `AppOutput { UpdateStatus(String) }`.
+  - Button clicks send `AppInput`.
+  - `AppModel::update` handles inputs: `core_handles.coordinator.send_message(CoordinatorMsg::StartListening).unwrap()`.
+  - Coordinator (`core`) sends status updates back to UI (via a channel or Relm4 sender passed during init).
+  5.  **Documentation:** Explain `AudioCaptureActor`, threading, message flow (UI -> Coordinator -> AudioCaptureActor -> Thread -> Coordinator).
+  6.  **Testing:** Manual: `cargo run`. Click Start/Stop. Verify status updates, logs show chunk arrivals at coordinator.
 
 ---
 
 **Phase 4: Stub Transcriber Process & IPC Client**
 
-- **Goal:** Create the `transcriber` stub process communication. Implement `TranscriptionClientActor` in `core` for process management and basic IPC.
+- **Goal:** Create the `transcriber` stub process communication. Implement `TranscriberActor` in `core` for process management and basic IPC.
 - **Tasks:**
   1.  **IPC Types (`core/src/types.rs`):** Add `serde`, `serde_json`. Define `IpcAudioChunk`, `IpcTranscriptionResult`, `FinalTranscription(String)`.
   2.  **Transcriber Stub (`transcriber/src/main.rs`):** Add `serde`, `serde_json`. Loop reading stdin lines, deserialize `IpcAudioChunk`. Serialize dummy `IpcTranscriptionResult`, print line to stdout, flush.
-  3.  **Transcription Client Actor (`core/src/transcriber_client.rs`):**
-      - Implement `Actor`. `init` takes a `Deferrer` or `External<CoordinatorMsg>` for sending results back to coordinator.
-      - `handle_msg`: Handles `ProcessAudioChunk(AudioChunk)`.
-      - In `init` or on first message: Spawn `transcriber` process (`std::process::Command`). Spawn threads for stdin/stdout communications, with access to the deferrer to send results back to coordinator via `defer_msg`.
+  3.  **Transcriber Actor (`core/src/transcriber.rs`):**
+      - Define messages: `TranscriberMsg { ProcessAudioChunk(AudioChunk), Shutdown }`.
+      - Implement `Actor` trait for `Transcriber`. State will hold process handle and communication channels.
+      - `pre_start`: Spawn `transcriber` process (`std::process::Command`). Spawn threads for stdin/stdout communications, with access to `ActorRef<CoordinatorMsg>` to send results back to coordinator.
+      - `handle`: Process `ProcessAudioChunk` by sending data to transcriber process via stdin. Handle `Shutdown` by terminating the process.
   4.  **Coordinator Integration (`core/src/coordinator.rs`):**
-      - `AppCoordinatorActor`:
-        - `init`: Create deferrer or external for transcription client. Spawn `TranscriptionClientActor`, pass it. Store actor handle.
-        - Define `CoordinatorMsg { ..., InternalAudioChunk(AudioChunk), InternalTranscriptionResult(FinalTranscription) }`.
-        - Modify `InternalAudioChunk` handler: Create suitable `AudioChunk`. `self.transcription_client_actor.send_msg(ProcessAudioChunk(chunk))` (actor-to-actor).
-        - Handle `InternalTranscriptionResult`: Log text. Send `AppOutput::UpdateTranscription` to UI.
-  5.  **UI Integration (`src/ui.rs`):** Add `gtk::TextView`/`Label`. Define `AppOutput::UpdateTranscription(String)`. Coordinator sends it. `AppModel::update` handles it.
-  6.  **Documentation:** Specify IPC protocol (JSON Lines). Explain `TranscriptionClientActor` threads. Detail stub behavior. Message flow.
+      - Extend `CoordinatorMsg` with `TranscriptionResult(FinalTranscription)`.
+      - Modify `Coordinator`:
+        - `pre_start`: Spawn `TranscriberActor` using `Actor::spawn`, store `ActorRef<TranscriberMsg>`.
+        - Modify `AudioChunk` handler: Forward chunk to transcriber: `self.transcriber.send_message(TranscriberMsg::ProcessAudioChunk(chunk)).unwrap()`.
+        - Handle `TranscriptionResult`: Log text. Send `AppOutput::UpdateTranscription` to UI.
+  5.  **UI Integration (`src/ui.rs`):** Add `gtk::TextView`/`Label`. Define `AppOutput::UpdateTranscription(String)`. `AppModel::update` handles it.
+  6.  **Documentation:** Specify IPC protocol (JSON Lines). Explain `TranscriberActor` threads. Detail stub behavior. Message flow.
   7.  **Testing:** Manual: `cargo run`. Start listening. Verify logs show full flow, UI shows dummy transcriptions.
 
 ---
@@ -109,7 +119,7 @@
 - **Goal:** Connect real audio to the real transcriber, display results in UI. Implement basic model path config loading in `core`.
 - **Tasks:**
   1.  **Core Configuration (`core/src/config.rs`):** Add `config-rs`, `serde`. Define `Settings { model_path: Option<String> }`. Implement `load_config()`, `save_config()`.
-  2.  **Pass Config (`core/src/coordinator.rs`, `core/src/transcriber_client.rs`):** Coordinator loads config. Pass necessary info to `TranscriptionClientActor`. Client passes `--model-path` arg when spawning `transcriber`.
+  2.  **Pass Config (`core/src/coordinator.rs`, `core/src/transcriber.rs`):** Coordinator loads config. Pass necessary info to `TranscriberActor`. Client passes `--model-path` arg when spawning `transcriber`.
   3.  **UI Settings Stub (`src/settings.rs`, `src/ui.rs`):** Create placeholder settings dialog component. Add "Settings" menu item to show it.
   4.  **Refine UI Output (`src/ui.rs`):** Ensure transcription `TextView` updates correctly.
   5.  **Documentation:** Document config file location, `model_path` setting.
@@ -119,13 +129,17 @@
 
 **Phase 7: Audio Pre-processing (Denoise, VAD)**
 
-- **Goal:** Implement `AudioProcessingActor` in `core` with denoising and VAD.
+- **Goal:** Implement `AudioProcessorActor` in `core` with denoising and VAD.
 - **Tasks:**
   1.  **Dependencies (`core/Cargo.toml`):** Add `nnnoiseless`, VAD crate.
-  2.  **Audio Processing Actor (`core/src/audio_processing.rs`):** Define `AudioProcessingActor`. `init` takes necessary configuration. May internally use `std::thread` and `mpsc` for heavy processing but exposes a Stakker message interface (e.g., `ProcessChunk(AudioChunk)`). Its handler would receive the chunk, process it (potentially sending to/receiving from an internal thread), and then send the result to the next actor via `send_msg`.
-  3.  **Pipeline Integration (`core/src/coordinator.rs`):** Update `AppCoordinatorActor::init`: Spawn `AudioProcessingActor` and `TranscriptionClientActor`, store their handles. Modify `InternalAudioChunk` handler: `self.audio_processing_actor_handle.send_msg(ProcessChunk(chunk))`. `AudioProcessingActor` handles `ProcessChunk`, performs its work, and then calls `self.transcription_client_actor_handle.send_msg(IpcAudioChunk(processed_chunk))` (or similar message). Remove the intermediate `mpsc` channels _between_ actors. Communication flow becomes: CaptureThread -> `mpsc` -> CoordinatorReceiverThread -> `defer_msg` -> Coordinator -> `send_msg` -> AudioProcessingActor -> `send_msg` -> TranscriptionClientActor.
-  4.  **Configuration (`core/src/config.rs`, `src/settings.rs`):** Add settings (enable/disable denoise/VAD, VAD mode). Update load/save. Pass config to `AudioProcessingActor`. Add GTK controls to settings UI (`src`).
-  5.  **Documentation:** Explain denoise/VAD. Update pipeline diagram to reflect direct actor-to-actor messaging (`send_msg`). Document config options.
+  2.  **Audio Processor Actor (`core/src/audio_processor.rs`):**
+      - Define messages: `AudioProcessorMsg { ProcessChunk(AudioChunk), Shutdown }`.
+      - Implement `Actor` trait for `AudioProcessor`. State might include denoising/VAD state.
+      - `pre_start`: Initialize audio processing components.
+      - `handle`: Process `ProcessChunk` by applying denoising/VAD, then forward to transcriber via `self.transcriber.send_message(TranscriberMsg::ProcessAudioChunk(processed_chunk)).unwrap()`.
+  3.  **Pipeline Integration (`core/src/coordinator.rs`):** Update `Coordinator::pre_start`: Spawn `AudioProcessorActor` and `TranscriberActor`, store their references. Modify `AudioChunk` handler: Forward to audio processor: `self.audio_processor.send_message(AudioProcessorMsg::ProcessChunk(chunk)).unwrap()`.
+  4.  **Configuration (`core/src/config.rs`, `src/settings.rs`):** Add settings (enable/disable denoise/VAD, VAD mode). Update load/save. Pass config to `AudioProcessorActor`. Add GTK controls to settings UI (`src`).
+  5.  **Documentation:** Explain denoise/VAD. Update pipeline diagram to reflect actor message flow. Document config options.
   6.  **Testing:** Manual: Test transcription quality with options enabled/disabled via settings. Verify VAD stops sending chunks during silence.
 
 ---
@@ -135,13 +149,13 @@
 - **Goal:** Implement hotkey and wake word activation, including silence detection for stopping.
 - **Tasks:**
   1.  **Dependencies (`core/Cargo.toml`):** Add hotkey library (`inputbot`), wake word library (`porcupine-rs`).
-  2.  **State Management (`core/src/types.rs`, `core/src/coordinator.rs`):** Define `AppState` enum. Add `current_state` field to `AppCoordinatorActor`.
-  3.  **Hotkey Listener (`core/src/activation/hotkey.rs`):** Create `run_hotkey_listener`. Run in `std::thread`. Use `inputbot` to bind key. On event, use a `Deferrer` or `External<CoordinatorMsg>` to send `CoordinatorMsg::HotkeyTriggered` to coordinator.
-  4.  **Wake Word Detection (`core/src/activation/wakeword.rs`, `core/src/audio_processing.rs`):** Add wake word detection to `AudioProcessingActor`. Feed raw audio. On detection, `send_msg` the `CoordinatorMsg::WakeWordDetected` directly to coordinator actor.
-  5.  **Silence Detection (`core/src/audio_processing.rs`, `core/src/coordinator.rs`):** Use VAD output in `AudioProcessingActor`. Track silence. If threshold exceeded, `send_msg` the `CoordinatorMsg::SilenceTimeout` to coordinator.
+  2.  **State Management (`core/src/types.rs`, `core/src/coordinator.rs`):** Define `AppState` enum. Add `current_state` field to `Coordinator` state.
+  3.  **Hotkey Listener (`core/src/activation/hotkey.rs`):** Create `run_hotkey_listener`. Run in `std::thread`. Use `inputbot` to bind key. On event, use `ActorRef::send_message` to send `CoordinatorMsg::HotkeyTriggered` to coordinator.
+  4.  **Wake Word Detection (`core/src/activation/wakeword.rs`, `core/src/audio_processor.rs`):** Add wake word detection to `AudioProcessorActor`. Feed raw audio. On detection, send `CoordinatorMsg::WakeWordDetected` to coordinator actor.
+  5.  **Silence Detection (`core/src/audio_processor.rs`, `core/src/coordinator.rs`):** Use VAD output in `AudioProcessorActor`. Track silence. If threshold exceeded, send `CoordinatorMsg::SilenceTimeout` to coordinator.
   6.  **Coordinator Logic (`core/src/coordinator.rs`):**
-      - `init`: Create deferrer for hotkey thread, spawn hotkey listener thread, pass deferrer.
-      - `handle_msg`: Handle `HotkeyTriggered`, `WakeWordDetected`, `SilenceTimeout`. Implement state transitions. Start/Stop actors using `send_msg`. Signal UI state changes.
+      - Add to `pre_start`: Create and store hotkey thread, pass ActorRef to hotkey listener.
+      - Extend `handle`: Process `HotkeyTriggered`, `WakeWordDetected`, `SilenceTimeout`. Implement state transitions. Start/Stop actors using `send_message`. Signal UI state changes.
   7.  **Configuration (`core/src/config.rs`, `src/settings.rs`):** Add settings (activation mode, hotkey, WW model path, enable WW, silence timeout). Update load/save. Add GTK controls to settings UI (`src`).
   8.  **Wake Word Model Download:** Provide script/instructions.
   9.  **Documentation:** Explain activation logic, state machine. Document config. WW model instructions.
@@ -154,8 +168,12 @@
 - **Goal:** Implement `OutputActor` in `core` using `enigo` to type transcriptions.
 - **Tasks:**
   1.  **Dependencies (`core/Cargo.toml`):** Add `enigo`.
-  2.  **Output Actor (`core/src/output.rs`):** Define `OutputActor`. `init`: Create `Enigo::new()`. `handle_msg` for `TypeText(String)`: Call `enigo.text()`. Handle errors.
-  3.  **Coordinator Integration (`core/src/coordinator.rs`):** `init`: Spawn `OutputActor`, store handle. Modify `InternalTranscriptionResult` handler: If state implies typing, `self.output_actor.send_msg(TypeText(result.0))` (actor-to-actor).
+  2.  **Output Actor (`core/src/output.rs`):**
+      - Define messages: `OutputMsg { TypeText(String), Shutdown }`.
+      - Implement `Actor` trait for `Output`. State will contain `Enigo` instance.
+      - `pre_start`: Create `Enigo::new()`.
+      - `handle`: Process `TypeText` by calling `enigo.text()`. Handle errors.
+  3.  **Coordinator Integration (`core/src/coordinator.rs`):** `pre_start`: Spawn `OutputActor`, store reference. Modify `TranscriptionResult` handler: If state implies typing, `self.output.send_message(OutputMsg::TypeText(result.0)).unwrap()`.
   4.  **Documentation:** Explain `OutputActor`.
   5.  **Testing:** Manual: Activate, speak. Verify text typed into focused window.
 
@@ -166,8 +184,8 @@
 - **Goal:** Implement command definition, parsing, and execution.
 - **Tasks:**
   1.  **Command Configuration (`core/src/config.rs`):** Define `CommandAction` enum (`Type`, `Exec`), command structs. Add `commands: HashMap<String, CommandAction>` to `Settings`. Update load/save. Use TOML.
-  2.  **Command Logic (`core/src/command.rs`, `core/src/coordinator.rs`):** Create `parse_command` function in coordinator. Logic: Check transcription against command triggers. If match: Substitute args into template. `Exec`: Use coordinator to spawn a thread for `std::process::Command::spawn()`. `Type`: Construct text, `self.output_actor.send_msg(TypeText(...))`. If no match: `self.output_actor.send_msg(TypeText(...))` with original text.
-  3.  **Coordinator Integration (`core/src/coordinator.rs`):** Modify `InternalTranscriptionResult` handler: Call `self.parse_command(...)` with the text directly.
+  2.  **Command Logic (`core/src/command.rs`, `core/src/coordinator.rs`):** Create `parse_command` function in coordinator. Logic: Check transcription against command triggers. If match: Substitute args into template. `Exec`: Use coordinator to spawn a thread for `std::process::Command::spawn()`. `Type`: Construct text, `self.output.send_message(OutputMsg::TypeText(...)).unwrap()`. If no match: `self.output.send_message(OutputMsg::TypeText(...)).unwrap()` with original text.
+  3.  **Coordinator Integration (`core/src/coordinator.rs`):** Modify `TranscriptionResult` handler: Call `self.parse_command(...)` with the text directly.
   4.  **UI Configuration (`src/settings.rs`):** Add GTK section to settings UI for command management (view/add/edit/remove). Load/save via `core::config`.
   5.  **Documentation:** Document command config syntax, actions, templating, UI.
   6.  **Testing:** Manual: Define commands. Test speaking them. Verify execution. Test UI for editing commands.
@@ -179,13 +197,14 @@
 - **Goal:** Systematically improve error handling, logging, and recovery.
 - **Tasks:**
   1.  **Error Types (`core/src/errors.rs`):** Define custom errors using `thiserror`.
-  2.  **Logging:** Configure file logging. Add more `span!`s, detailed event/error logging.
-  3.  **Transcriber Resilience (`core/src/transcriber_client.rs`):** Monitor child process. On unexpected exit, use deferrer to notify coordinator, implement optional auto-restart. Handle pipe errors.
-  4.  **Actor Error Handling (`core`):** Use `Result`. Handle errors from `send_msg`/`defer_msg` (using `Option` return). Report critical errors to coordinator.
+  2.  **Logging:** Configure file logging. Add more detailed event/error logging.
+  3.  **Transcriber Resilience (`core/src/transcriber.rs`):** Monitor child process. On unexpected exit, notify coordinator, implement optional auto-restart. Handle pipe errors.
+  4.  **Actor Error Handling (`core`):** Use `Result` for message handling. Handle errors from `send_message` (unwrapping or checking results). Report critical errors to coordinator.
   5.  **User Feedback (`src/ui.rs`, `core/src/coordinator.rs`):** Coordinator formats errors. Send `AppOutput::ShowError(String)` to UI thread. UI shows `gtk::MessageDialog`/`InfoBar`.
   6.  **Configuration Validation (`core/src/config.rs`):** Validate config post-load. Report errors.
-  7.  **Documentation:** Describe logging setup, common errors, troubleshooting.
-  8.  **Testing:** Manual: Kill transcriber. Provide invalid config. Verify errors reported gracefully in UI/logs. Check log files.
+  7.  **Supervision and Actor Lifecycle Management:** Leverage Ractor's supervision model for actor crash recovery.
+  8.  **Documentation:** Describe logging setup, common errors, troubleshooting. Document supervision strategy.
+  9.  **Testing:** Manual: Kill transcriber. Provide invalid config. Verify errors reported gracefully in UI/logs. Check log files.
 
 ---
 

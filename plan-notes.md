@@ -24,34 +24,57 @@
 
 - Created `src/tray.rs` as a stub with a placeholder `init_tray()` function.
 
-# Phase 2 Implementation Notes (Stakker & Core Initialization)
+# Phase 2 Implementation Notes (Ractor & Core Initialization)
 
-## 1. Stakker Setup (`core/`)
+## 1. Ractor Setup (`core/`)
 
-- Added `stakker` and `tracing` as dependencies in `core/Cargo.toml`.
-- Implemented `AppCoordinator` actor with a `CoordinatorMsg` enum and `handle` method for logging receipt of `HandleTest`.
-- Added `CoreHandles` struct and `init_core_actors` function for spawning the coordinator actor.
+- Updated `core/Cargo.toml` to replace Stakker with Ractor v0.13 dependency.
+- Created a proper Actor implementation for `Coordinator` with the `Actor` trait.
+- Defined messages in `types.rs`:
+  - `CoordinatorMsg::HandleTest` for basic testing
+  - `CoordinatorMsg::StartListening` and `StopListening` for future audio capture
+  - `CoordinatorMsg::AudioChunk` for receiving audio data
+- Added `AppOutput` enum for sending messages back to the UI.
+- Created `CoreHandles` struct holding `ActorRef<CoordinatorMsg>`.
+- Implemented `init_core_actors` function that returns `CoreHandles`.
 
-## 2. Stakker Integration (`src/`)
+## 2. Ractor Integration (`src/`)
 
-- Uncommented/added `relm4` and `gtk4` dependencies in root `Cargo.toml`.
-- Refactored `src/main.rs` to:
-  - Initialize Stakker and core actors.
-  - Store `CoreHandles` in the app model.
-  - Launch a minimal Relm4 GTK window.
+- Added `tokio` dependency with full features for async runtime.
+- Added `flume` dependency for message passing between UI thread and async tasks.
+- Updated `main.rs` to use `#[tokio::main]` for the async runtime.
+- Set up bidirectional communication between UI and core:
+  - Core-to-UI: Using tokio channel and a closure passed to `init_core_actors`.
+  - UI-to-Core: Using `actor_ref.send_message()` from button handlers.
 
 ## 3. UI→Core Communication
 
-- Added a "Test Core" button to the GTK window.
-- Defined `AppInput::TestCore` in the UI.
-- On button click, `AppInput::TestCore` is sent to the app model, which calls `cast!` to send `CoordinatorMsg::HandleTest` to the coordinator.
-- Coordinator logs receipt of the message via `tracing`.
+- Defined proper Relm4 components:
+  - `AppInput` enum with messages for UI events
+  - `AppModel` struct with state and core handles
+  - View with buttons for testing core functionality
+- Implemented basic message flow:
+  - Button clicks generate `AppInput` messages
+  - `AppModel::update` handles messages and forwards to core via `send_message()`
+  - Core responds via the tokio channel
+  - Updates are processed in the UI via `AppInput::ProcessOutput`
 
-## 4. Notes
+## 4. Improvements
 
-- The previous audio/transcription logic in `main.rs` was replaced with the minimal Phase 2 UI/actor shell for strict plan compliance.
-- The GTK/Relm4 shell is now functional and integrated with the actor system.
-- Next: Implement audio capture and pipeline in Phase 3.
+- Used Ractor's async trait implementation for the `Actor` trait.
+- Set up proper bidirectional communication channels between the UI and core.
+- Added status text UI element to display updates from core.
+- Implemented proper error handling for message passing.
+- Used tokio tasks for background processing.
+
+## 5. Notes on Ractor vs Stakker
+
+- Ractor follows an Erlang-inspired actor model with explicit message passing.
+- Major differences from Stakker:
+  - Ractor uses async/await for message handling.
+  - Messages are explicitly passed with `send_message()` rather than using macros.
+  - Actor state is managed through the `pre_start` and `handle` methods.
+  - Supervision is built into Ractor for handling actor failures.
 
 # Phase 3 Implementation Notes (Audio Capture)
 
