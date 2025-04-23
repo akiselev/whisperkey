@@ -3,7 +3,11 @@ use relm4::prelude::*;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use whisperkey_core::{init_core_actors, types::AppOutput, CoordinatorMsg, CoreHandles};
+use whisperkey_core::{
+    init_core_actors, load_config, types::AppOutput, CoordinatorMsg, CoreHandles,
+};
+
+mod settings;
 
 // AppInput enum for Relm4
 #[derive(Debug)]
@@ -14,6 +18,7 @@ enum AppInput {
     ProcessOutput(AppOutput),
     UpdateCoreHandles,
     UpdateTextBuffer(String),
+    OpenSettings,
 }
 
 struct AppModel {
@@ -55,9 +60,19 @@ impl SimpleComponent for AppModel {
                 });
             });
 
-            // Get model path - in a real app this would come from config
-            // For testing, we'll look for a model in a default location
-            let model_path = get_default_model_path();
+            // Load config to get model path
+            let config = load_config().unwrap_or_else(|e| {
+                eprintln!("Failed to load config: {}", e);
+                Arc::new(whisperkey_core::Settings::default())
+            });
+
+            // Use model path from config, or fall back to default
+            let model_path = config
+                .model_path
+                .as_ref()
+                .map(|p| PathBuf::from(p))
+                .or_else(|| get_default_model_path());
+
             if let Some(path) = &model_path {
                 println!("Using Vosk model at: {:?}", path);
             } else {
@@ -95,68 +110,102 @@ impl SimpleComponent for AppModel {
 
     view! {
         gtk::Window {
-            set_title: Some("WhisperKey Phase 4 Test Shell"),
+            set_title: Some("WhisperKey"),
             set_default_width: 600,
             set_default_height: 400,
 
             gtk::Box {
                 set_orientation: gtk::Orientation::Vertical,
-                set_spacing: 12,
-                set_margin_all: 24,
+                set_spacing: 0,
 
-                // Status area
-                gtk::Label {
-                    #[watch]
-                    set_label: &model.status_text,
-                    set_margin_bottom: 12,
-                },
-
-                // Control buttons
+                // Menu bar
                 gtk::Box {
                     set_orientation: gtk::Orientation::Horizontal,
-                    set_spacing: 8,
-                    set_margin_bottom: 20,
+                    set_spacing: 0,
+                    set_margin_all: 0,
 
-                    gtk::Button {
-                        set_label: "Test Core",
-                        connect_clicked => AppInput::TestCore,
-                    },
-                    gtk::Button {
-                        set_label: "Start Listening",
-                        connect_clicked => AppInput::StartListening,
-                    },
-                    gtk::Button {
-                        set_label: "Stop Listening",
-                        connect_clicked => AppInput::StopListening,
-                    },
+                    gtk::MenuButton {
+                        set_label: "Menu",
+
+                        #[wrap(Some)]
+                        set_popover = &gtk::Popover {
+                            gtk::Box {
+                                set_orientation: gtk::Orientation::Vertical,
+                                set_margin_all: 4,
+                                set_spacing: 4,
+
+                                gtk::Button {
+                                    set_label: "Settings",
+                                    connect_clicked[sender] => move |_| {
+                                        sender.input(AppInput::OpenSettings);
+                                    }
+                                },
+                            }
+                        }
+                    }
                 },
 
-                // Transcription area
-                gtk::Label {
-                    set_label: "Transcription Results:",
-                    set_halign: gtk::Align::Start,
-                    set_margin_bottom: 6,
-                },
-
-                gtk::ScrolledWindow {
-                    set_hexpand: true,
+                // Main content
+                gtk::Box {
+                    set_orientation: gtk::Orientation::Vertical,
+                    set_spacing: 12,
+                    set_margin_all: 24,
                     set_vexpand: true,
-                    set_min_content_height: 200,
 
-                    gtk::TextView {
-                        set_editable: false,
-                        set_cursor_visible: false,
-                        set_wrap_mode: gtk::WrapMode::Word,
-
-                        // Update text when transcription changes
+                    // Status area
+                    gtk::Label {
                         #[watch]
-                        set_buffer: Some(&{
-                            let buffer = gtk::TextBuffer::new(None::<&gtk::TextTagTable>);
-                            buffer.set_text(&model.transcription_text);
-                            buffer
-                        }),
+                        set_label: &model.status_text,
+                        set_margin_bottom: 12,
                     },
-                },
+
+                    // Control buttons
+                    gtk::Box {
+                        set_orientation: gtk::Orientation::Horizontal,
+                        set_spacing: 8,
+                        set_margin_bottom: 20,
+
+                        gtk::Button {
+                            set_label: "Test Core",
+                            connect_clicked => AppInput::TestCore,
+                        },
+                        gtk::Button {
+                            set_label: "Start Listening",
+                            connect_clicked => AppInput::StartListening,
+                        },
+                        gtk::Button {
+                            set_label: "Stop Listening",
+                            connect_clicked => AppInput::StopListening,
+                        },
+                    },
+
+                    // Transcription area
+                    gtk::Label {
+                        set_label: "Transcription Results:",
+                        set_halign: gtk::Align::Start,
+                        set_margin_bottom: 6,
+                    },
+
+                    gtk::ScrolledWindow {
+                        set_hexpand: true,
+                        set_vexpand: true,
+                        set_min_content_height: 200,
+
+                        gtk::TextView {
+                            set_editable: false,
+                            set_cursor_visible: false,
+                            set_wrap_mode: gtk::WrapMode::Word,
+
+                            // Update text when transcription changes
+                            #[watch]
+                            set_buffer: Some(&{
+                                let buffer = gtk::TextBuffer::new(None::<&gtk::TextTagTable>);
+                                buffer.set_text(&model.transcription_text);
+                                buffer
+                            }),
+                        },
+                    },
+                }
             }
         }
     }
@@ -200,28 +249,42 @@ impl SimpleComponent for AppModel {
             AppInput::ProcessOutput(output) => match output {
                 AppOutput::UpdateStatus(status) => {
                     self.status_text = status;
-                    println!("Status updated: {}", self.status_text);
                 }
                 AppOutput::UpdateTranscription(text) => {
-                    self.transcription_text = text.clone();
-                    println!("Transcription updated: {}", text);
+                    if !text.is_empty() {
+                        // Append to transcription text with a newline if not empty
+                        if !self.transcription_text.is_empty() {
+                            self.transcription_text.push_str("\n");
+                        }
+                        self.transcription_text.push_str(&text);
+                    }
                 }
             },
             AppInput::UpdateCoreHandles => {
-                // Get the core handles from the thread-local
+                // Get core handles from thread-local storage
                 thread_local! {
                     static CORE_HANDLES: std::cell::RefCell<Option<CoreHandles>> = std::cell::RefCell::new(None);
                 }
 
                 CORE_HANDLES.with(|h| {
-                    if let Some(handles) = h.borrow_mut().take() {
-                        self.core_handles = Some(handles);
-                        println!("Core handles updated");
-                    }
+                    self.core_handles = h.borrow_mut().take();
                 });
             }
-            AppInput::UpdateTextBuffer(text) => {
-                self.transcription_text = text;
+            AppInput::UpdateTextBuffer(_) => {
+                // Do nothing; the text is bound in the view macro
+            }
+            AppInput::OpenSettings => {
+                // Find the parent window from the list of toplevel windows
+                if let Some(window) = gtk::Window::list_toplevels().first() {
+                    if let Ok(parent) = window.clone().downcast::<gtk::Window>() {
+                        // Show settings dialog with the parent window
+                        if settings::show_settings_dialog(&parent) {
+                            // The dialog is now non-blocking, so we'll just show a message
+                            // that the user may need to restart after changing settings
+                            self.status_text = "Settings dialog opened. You may need to restart the app after changing settings.".to_string();
+                        }
+                    }
+                }
             }
         }
     }

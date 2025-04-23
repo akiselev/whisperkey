@@ -3,10 +3,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 pub mod audio_capture;
+pub mod config;
 pub mod coordinator;
 pub mod transcriber;
 pub mod types;
 
+pub use config::{load_config, save_config, Settings};
 pub use coordinator::Coordinator;
 pub use types::{AppOutput, AudioCaptureMsg, CoordinatorMsg};
 

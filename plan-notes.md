@@ -199,3 +199,108 @@
 - JSON is used for IPC serialization
 - The UI now shows both status updates and transcription results
 - Dummy/stub transcription will be replaced with real Vosk integration in Phase 5
+
+# Phase 5 Implementation Notes (Vosk Integration)
+
+## 1. Vosk Dependencies
+
+- Added `whisper-rs` dependency to `core/Cargo.toml` using the workspace definition
+- Added `vosk` library dependency to `transcriber/Cargo.toml` for the separate process
+- Used clap for command-line argument parsing in the transcriber process
+
+## 2. Transcriber Process Implementation
+
+- Replaced the stub transcriber with real Vosk-based transcription in `transcriber/src/main.rs`:
+  - Added command-line arguments for model path and sample rate using clap
+  - Initialized Vosk model and recognizer with proper options
+  - Process audio chunks from stdin and feed samples to Vosk
+  - Get both partial and final results from Vosk and forward them via IPC
+  - Added proper confidence reporting when available
+  - Implemented proper error handling for model loading and recognition
+
+## 3. Transcriber Actor Enhancement
+
+- Updated `core/src/transcriber.rs` to support Vosk integration:
+  - Added model path handling to the actor and its messages
+  - Pass model path to transcriber process as command-line argument
+  - Enhanced error handling for process startup and communication
+
+## 4. Coordinator Enhancement
+
+- Updated `core/src/coordinator.rs` to handle model path:
+  - Added model path field to store and pass to transcriber
+  - Added model path to actor arguments
+  - Log model path information
+
+## 5. UI Enhancement
+
+- Updated `src/main.rs` to support model path selection:
+  - Added a default model path lookup function for testing
+  - Pass model path to core during initialization
+  - Improved transcription display in the UI
+
+## 6. Notes
+
+- Vosk integration is now functional:
+  - Audio is captured via CPAL
+  - Audio chunks are sent to the transcriber process
+  - Vosk processes the audio and generates transcription results
+  - Results are sent back via IPC to the UI
+- The current implementation requires a model path to be provided
+- Future phases will add configuration of model paths
+
+# Phase 6 Implementation Notes (Configuration & E2E Flow)
+
+## 1. Configuration System Implementation
+
+- Added `config` and `dirs` dependencies to `core/Cargo.toml` for configuration management
+- Added `toml` dependency for serialization of config files
+- Created `core/src/config.rs` with:
+  - `Settings` struct with `model_path` field
+  - Functions for loading/saving configuration from/to file
+  - Default settings when no config file exists
+  - Configuration directory management using `dirs` crate
+  - Proper error handling for config operations
+
+## 2. Settings UI Implementation
+
+- Created `src/settings.rs` with a GTK4 settings dialog:
+  - Dialog to view and edit the model path
+  - File chooser for selecting Vosk model directory
+  - Save/cancel buttons with proper responses
+  - Integration with configuration system
+
+## 3. Coordinator Integration
+
+- Updated `coordinator.rs` to use the configuration system:
+  - Added `config` field to store loaded settings
+  - Modified initialization to load config and use model path from it
+  - Added precedence logic: CLI model path overrides config
+
+## 4. UI Integration
+
+- Updated `main.rs` to include settings dialog:
+  - Added menu button with Settings option
+  - Added settings dialog launcher
+  - Updated initialization to use config for model path
+  - Added status messaging when settings are updated
+
+## 5. Configuration Storage
+
+- Config is stored in standard OS-specific locations:
+  - Windows: %APPDATA%\whisperkey
+  - macOS: ~/Library/Application Support/whisperkey
+  - Linux: ~/.config/whisperkey
+- Configuration uses TOML format for human readability
+
+## 6. Notes
+
+- The end-to-end flow is now complete:
+  1. Configuration is loaded at startup
+  2. Model path is determined from config or CLI arguments
+  3. Audio is captured when listening is started
+  4. Audio is processed by the Vosk transcriber
+  5. Transcription results are displayed in the UI
+  6. Settings can be updated via the settings dialog
+- The application now handles the complete workflow from audio capture to transcription display
+- Configuration persistence allows for easy setup across sessions

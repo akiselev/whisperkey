@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::{
     audio_capture::AudioCaptureActor,
+    config::{self, Settings},
     transcriber::TranscriberActor,
     types::{AppOutput, AudioCaptureMsg, CoordinatorMsg, TranscriberMsg},
 };
@@ -16,8 +17,8 @@ pub struct CoordinatorState {
     ui_sender: Arc<dyn Fn(AppOutput) + Send + Sync + 'static>,
     audio_capture: Option<ActorRef<AudioCaptureMsg>>,
     transcriber: Option<ActorRef<TranscriberMsg>>,
-    sample_rate: u32,            // Add sample rate for transcriber
-    model_path: Option<PathBuf>, // Path to Vosk model
+    sample_rate: u32,      // Add sample rate for transcriber
+    config: Arc<Settings>, // Configuration loaded from file
 }
 
 #[ractor::async_trait]
@@ -32,9 +33,19 @@ impl Actor for Coordinator {
     async fn pre_start(
         &self,
         myself: ActorRef<Self::Msg>,
-        (ui_sender, model_path): Self::Arguments,
+        (ui_sender, model_path_override): Self::Arguments,
     ) -> Result<Self::State, ActorProcessingErr> {
         tracing::info!("Coordinator actor started");
+
+        // Load configuration
+        let config = config::load_config().unwrap_or_else(|e| {
+            tracing::error!("Failed to load config: {}", e);
+            Arc::new(Settings::default())
+        });
+
+        // Use model path from override (CLI) or config
+        let model_path = model_path_override
+            .or_else(|| config.model_path.as_ref().map(|path| PathBuf::from(path)));
 
         // Log model path if provided
         if let Some(path) = &model_path {
@@ -60,7 +71,7 @@ impl Actor for Coordinator {
         let (transcriber, _) = Actor::spawn(
             None,
             TranscriberActor {},
-            (myself.clone(), sample_rate, model_path.clone()),
+            (myself.clone(), sample_rate, model_path),
         )
         .await
         .map_err(|e| {
@@ -79,7 +90,7 @@ impl Actor for Coordinator {
             audio_capture: Some(audio_capture),
             transcriber: Some(transcriber),
             sample_rate,
-            model_path,
+            config,
         })
     }
 
