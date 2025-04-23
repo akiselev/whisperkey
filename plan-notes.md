@@ -78,73 +78,61 @@
 
 # Phase 3 Implementation Notes (Audio Capture)
 
-## 1. Dependencies (`core/`)
+## 1. Audio Types and Modules
 
-- Added `cpal` crate for audio I/O (already in workspace dependencies).
-- Using `std::sync::mpsc` for audio chunk communication between capture thread and coordinator.
+- Updated `core/src/types.rs` to include `AudioChunk(Vec<f32>)` for storing audio data.
+- Added `AudioCaptureMsg { Start, Stop }` for controlling the audio capture actor.
+- Added `CoordinatorMsg::UpdateStatus(String)` for internal status updates between actors.
+- Created new modules:
+  - `core/src/audio_capture.rs` for the audio capture actor
+  - `core/src/coordinator.rs` for the coordinator implementation
 
-## 2. Audio Types (`core/src/types.rs`)
+## 2. Audio Capture Actor Implementation
 
-- Created file.
-- Defined `AudioChunk(Vec<f32>)`.
-- Defined `AudioCaptureCmd { Start, Stop }`.
-- Added placeholder `AppOutput { UpdateStatus(String) }` for UI communication back from core.
+- Created `AudioCaptureActor` with proper Ractor `Actor` trait implementation.
+- Added audio capture error handling using `thiserror` crate.
+- `start_capture` method initializes CPAL audio inputs:
+  - Gets default host and input device
+  - Configures the device using default input config
+  - Builds input stream with callback that creates `AudioChunk` instances
+  - Sends chunks to the coordinator actor
+- Implemented message handling for `Start`/`Stop` commands:
+  - `Start`: Initializes and stores the CPAL stream
+  - `Stop`: Drops the stream to stop capture
+  - Both send status updates back to coordinator
 
-## 3. Audio Capture Actor (`core/src/audio_capture.rs`)
+## 3. Coordinator Implementation
 
-- Created file and implemented `AudioCaptureActor`.
-- `init` takes `mpsc::Sender<AudioChunk>`.
-- `handle` processes `AudioCaptureCmd::Start` and `AudioCaptureCmd::Stop`.
-- `start_capture` uses `cpal` to get the default input device and stream.
-- `cpal` stream callback converts data to `f32`, wraps in `AudioChunk`, and sends via `mpsc::Sender`.
-- The `cpal::Stream` object is stored in the actor state to keep the stream alive.
-- `stop_capture` drops the `Stream` object.
-- Added basic error handling using `thiserror` and logging.
+- Moved coordinator from `lib.rs` to dedicated `coordinator.rs` file.
+- Created `CoordinatorState` with fields:
+  - `ui_sender`: Function to send updates to UI
+  - `audio_capture`: Reference to audio capture actor
+- `pre_start` now spawns the audio capture actor and passes itself as argument.
+- Updated message handling:
+  - `StartListening`: Forwards to audio capture actor
+  - `StopListening`: Forwards to audio capture actor
+  - `AudioChunk`: Logs receipt (will be forwarded to transcriber in Phase 4)
+  - `UpdateStatus`: Forwards status messages from actors to UI
 
-## 4. Coordinator Integration (`core/src/coordinator.rs`)
+## 4. Integration
 
-- Created file `core/src/coordinator.rs` (was missing).
-- Added `Actor<AudioCaptureActor>` handle to `AppCoordinator`.
-- Modified `CoordinatorMsg` to include `StartListening`, `StopListening`, `InternalAudioChunk(AudioChunk)`.
-- Modified `AppCoordinator::init`:
-  - Accepts a generic `ui_sender: Fn(AppOutput) + Send + Sync + 'static` (implemented via `Box<dyn Fn(...)>`).
-  - Stores `ui_sender`.
-  - Creates `mpsc::channel::<AudioChunk>()`.
-  - Spawns `AudioCaptureActor`, passing the `mpsc::Sender`.
-  - Spawns a dedicated thread to receive from `mpsc::Receiver<AudioChunk>`.
-  - Receiver thread loop sends `CoordinatorMsg::InternalAudioChunk` to the coordinator using `self_ref.defer()`. Requires getting `actor_ref()` in `init`.
-- Implemented `handle` for new messages:
-  - `StartListening`/`StopListening`: Sends `AudioCaptureCmd::Start`/`Stop` to `audio_capture_actor` using `send()`.
-  - `InternalAudioChunk`: Logs receipt (size).
-- Implemented `send_status_to_ui` helper method using the stored `ui_sender` closure.
-- Sends status updates to UI on start/stop and init.
-- Modified `core/src/lib.rs`:
-  - Added `pub mod audio_capture`.
-  - Updated `init_core_actors` to be generic and accept `ui_sender`, passing it to `AppCoordinator::init`.
+- Updated `core/src/lib.rs` to include new modules and use the new coordinator implementation.
+- Removed the old coordinator implementation from `lib.rs`.
+- Kept the existing UI integration which already had:
+  - `StartListening`/`StopListening` buttons
+  - Status label for updates
+  - Message passing from UI to core and back
 
-## 5. UI Integration (`src/main.rs`)
+## 5. Error Handling
 
-- Added `flume` dependency to root `Cargo.toml` (needed for `run_with_receive`).
-- Defined `AppInput::{StartListening, StopListening}`.
-- `AppModel::Output` is now `whisperkey_core::types::AppOutput`.
-- Added `status_text: String` to `AppModel`.
-- Updated `view!` macro:
-  - Added `gtk::Label` bound to `model.status_text`.
-  - Added "Start Listening" and "Stop Listening" `gtk::Button`s triggering corresponding `AppInput` messages.
-- Updated `AppModel::init` to take `CoreHandles` as init parameter.
-- Updated `AppModel::update`:
-  - Handles `AppInput::StartListening`/`StopListening`: Sends `CoordinatorMsg::StartListening`/`StopListening` to coordinator using `core_handles.coordinator.defer()`.
-- Implemented `AppModel::output` method:
-  - Handles `AppOutput::UpdateStatus`: Updates `model.status_text`.
-- Updated `main` function:
-  - Creates a `flume` channel.
-  - Creates a closure `ui_sender_closure` capturing the `flume` sender to pass to `init_core_actors`.
-  - Calls `init_core_actors` _before_ running the app, passing the closure.
-  - Uses `app.run_with_receive(core_handles, receiver)` to integrate the flume receiver with the Relm4 event loop.
+- Added proper error types for audio capture issues.
+- Used Rust's `Result` type throughout for robust error handling.
+- Added appropriate logging at different levels (info, debug, error).
+- Status updates provide feedback to the user via the UI.
 
-## 6. Notes
+## 6. Notes on Audio Capture
 
-- The audio capture pipeline (Capture Actor -> mpsc -> Receiver Thread -> Coordinator Actor) is established.
-- UI can now trigger start/stop of audio capture.
-- Core coordinator can send status updates back to the UI label.
-- Next: Phase 4 - Stub Transcriber Process & IPC.
+- Audio is captured using CPAL's default input device and configuration.
+- Audio data is sent as raw f32 samples in `AudioChunk` messages.
+- The stream is properly cleaned up when stopped.
+- In Phase 4, audio chunks will be forwarded to the transcriber process.

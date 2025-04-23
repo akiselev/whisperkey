@@ -1,5 +1,3 @@
-use std::sync::mpsc;
-
 // Represents a chunk of raw audio data (e.g., f32 samples)
 #[derive(Debug, Clone)] // Clone might be useful, Debug for logging
 pub struct AudioChunk(pub Vec<f32>);
@@ -18,6 +16,7 @@ pub enum CoordinatorMsg {
     StartListening,
     StopListening,
     AudioChunk(AudioChunk), // Message for coordinator to handle chunks
+    UpdateStatus(String),   // For internal status updates
                             // Add other messages as needed (e.g., for results, state changes)
 }
 
