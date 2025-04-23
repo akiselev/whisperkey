@@ -304,3 +304,76 @@
   6. Settings can be updated via the settings dialog
 - The application now handles the complete workflow from audio capture to transcription display
 - Configuration persistence allows for easy setup across sessions
+
+# Phase 7 Implementation Notes (Audio Pre-processing)
+
+## 1. Audio Processing Dependencies
+
+- Added `nnnoiseless` for noise reduction and `webrtc-vad` for voice activity detection to core/Cargo.toml.
+- Nnnoiseless is used for real-time noise reduction and cleanup of audio signals.
+- WebRTC VAD is used for detecting speech in the audio stream and determining when silence occurs.
+
+## 2. Audio Processor Actor Implementation
+
+- Created the `AudioProcessorActor` to handle audio pre-processing tasks, implemented with Ractor for actor model concurrency.
+- Major components:
+  - Noise reduction using the DenoiseState from nnnoiseless.
+  - Voice activity detection using WebRTC's VAD, running in its own thread due to Send/Sync limitations.
+  - Silence detection with configurable thresholds, sending notifications to the coordinator when silence is detected.
+
+## 3. Thread-Based VAD Implementation
+
+- The WebRTC VAD implementation is not Send + Sync, so it was placed in a dedicated thread.
+- Implemented a message-passing system between the actor and the VAD thread:
+  - `VadRequest` enum for sending audio chunks and commands to the VAD thread.
+  - `VadResponse` enum for receiving detection results or errors.
+  - The VAD thread processes audio samples and returns a boolean indicating voice presence.
+
+## 4. Configuration System Enhancement
+
+- Enhanced the `Settings` struct in config.rs with:
+  - `enable_denoise`: Boolean to enable/disable noise reduction.
+  - `enable_vad`: Boolean to enable/disable voice activity detection.
+  - `vad_mode`: Enum for WebRTC's VAD sensitivity modes (Quality, LowBitrate, Aggressive, VeryAggressive).
+  - `vad_energy_threshold`: Float for backup VAD using simple energy-based detection.
+  - `silence_threshold_ms`: Duration in milliseconds to consider as silence.
+- These settings are persisted in the TOML configuration file and can be adjusted via the settings dialog.
+
+## 5. UI Integration
+
+- Enhanced the settings dialog to include audio processing options:
+  - Checkbox for enabling/disabling noise reduction.
+  - Checkbox for enabling/disabling voice activity detection.
+  - ComboBox for selecting VAD mode.
+  - SpinButton for configuring energy threshold.
+  - SpinButton for configuring silence threshold duration.
+- Settings are properly saved and loaded from the configuration file.
+
+## 6. Pipeline Integration
+
+- Integrated the audio processor into the existing pipeline:
+  - Changed the data flow to: `AudioCapture → AudioProcessor → Transcriber → Coordinator → UI`.
+  - The audio processor sits between audio capture and transcription, processing all audio chunks.
+  - Processed chunks are sent to the transcriber for speech recognition.
+  - VAD status (speech/silence) is sent directly to the coordinator.
+
+## 7. Fallback VAD Mechanism
+
+- Implemented a simple energy-based VAD as a fallback mechanism:
+  - Calculate the energy of audio chunks (sum of squared samples).
+  - Compare the energy level to a configurable threshold.
+  - Useful when WebRTC VAD is not available or disabled.
+
+## 8. Notes on Implementation Challenges
+
+- Encountered issues with the WebRTC VAD library's thread safety, requiring a dedicated thread approach.
+- Used message-passing to communicate between the actor model and the VAD thread.
+- Learned how nnnoiseless DenoiseState's API works for efficient audio processing.
+- Leveraged existing configuration and settings systems to make preprocessing features configurable.
+
+## 9. Future Improvements
+
+- Potential for more specialized audio filters (bandpass, high-pass, etc.).
+- Option to revert to WebRTC's full audio processing module for more advanced features.
+- Ability to save and load audio processing presets for different environments.
+- Visual indicators in the UI to show VAD status and audio energy levels.

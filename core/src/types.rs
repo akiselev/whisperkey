@@ -11,6 +11,13 @@ pub enum AudioCaptureMsg {
     Stop,
 }
 
+// Commands for the AudioProcessorActor
+#[derive(Debug)]
+pub enum AudioProcessorMsg {
+    ProcessChunk(AudioChunk),
+    Shutdown,
+}
+
 // Messages related to the AppCoordinator
 #[derive(Debug)]
 pub enum CoordinatorMsg {
@@ -20,6 +27,7 @@ pub enum CoordinatorMsg {
     AudioChunk(AudioChunk), // Message for coordinator to handle chunks
     UpdateStatus(String),   // For internal status updates
     TranscriptionResult(FinalTranscription), // From transcriber
+    SilenceDetected(bool),  // Silence state change from VAD
 }
 
 // For UI updates

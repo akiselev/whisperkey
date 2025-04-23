@@ -3,14 +3,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 pub mod audio_capture;
+pub mod audio_processor;
 pub mod config;
 pub mod coordinator;
 pub mod transcriber;
 pub mod types;
 
-pub use config::{load_config, save_config, Settings};
+pub use config::{load_config, save_config, Settings, VadMode};
 pub use coordinator::Coordinator;
-pub use types::{AppOutput, AudioCaptureMsg, CoordinatorMsg};
+pub use types::{AppOutput, AudioCaptureMsg, AudioChunk, CoordinatorMsg};
 
 pub struct CoreHandles {
     pub coordinator: ActorRef<CoordinatorMsg>,
@@ -19,13 +20,14 @@ pub struct CoreHandles {
 pub async fn init_core_actors(
     ui_sender: Arc<dyn Fn(AppOutput) + Send + Sync + 'static>,
     model_path: Option<PathBuf>,
-) -> CoreHandles {
-    // Spawn coordinator actor
-    let (coordinator, _handle) = Actor::spawn(None, Coordinator {}, (ui_sender, model_path))
+) -> Result<CoreHandles, Box<dyn std::error::Error>> {
+    // Initialize the coordinator actor
+    let (coordinator, handle) = Actor::spawn(None, Coordinator {}, (ui_sender, model_path))
         .await
-        .expect("Failed to start coordinator actor");
+        .expect("Failed to spawn coordinator actor");
 
-    CoreHandles { coordinator }
+    // Return handles to the actors
+    Ok(CoreHandles { coordinator })
 }
 
 // Retain stub for compatibility

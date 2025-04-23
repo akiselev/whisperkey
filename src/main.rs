@@ -88,7 +88,7 @@ impl SimpleComponent for AppModel {
             }
 
             CORE_HANDLES.with(|h| {
-                *h.borrow_mut() = Some(core_handles);
+                *h.borrow_mut() = Some(core_handles.expect("Failed to initialize core actors"));
             });
 
             // Signal to update core handles and status

@@ -4,9 +4,10 @@ use std::sync::Arc;
 
 use crate::{
     audio_capture::AudioCaptureActor,
+    audio_processor::AudioProcessorActor,
     config::{self, Settings},
     transcriber::TranscriberActor,
-    types::{AppOutput, AudioCaptureMsg, CoordinatorMsg, TranscriberMsg},
+    types::{AppOutput, AudioCaptureMsg, AudioProcessorMsg, CoordinatorMsg, TranscriberMsg},
 };
 
 pub struct Coordinator {
@@ -16,6 +17,7 @@ pub struct Coordinator {
 pub struct CoordinatorState {
     ui_sender: Arc<dyn Fn(AppOutput) + Send + Sync + 'static>,
     audio_capture: Option<ActorRef<AudioCaptureMsg>>,
+    audio_processor: Option<ActorRef<AudioProcessorMsg>>,
     transcriber: Option<ActorRef<TranscriberMsg>>,
     sample_rate: u32,      // Add sample rate for transcriber
     config: Arc<Settings>, // Configuration loaded from file
@@ -81,6 +83,25 @@ impl Actor for Coordinator {
             ))
         })?;
 
+        // Spawn the audio processor actor
+        let (audio_processor, _) = Actor::spawn(
+            None,
+            AudioProcessorActor {},
+            (
+                myself.clone(),
+                transcriber.clone(),
+                sample_rate,
+                config.clone(),
+            ),
+        )
+        .await
+        .map_err(|e| {
+            ActorProcessingErr::from(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to start audio processor actor: {}", e),
+            ))
+        })?;
+
         // Send initial status to UI
         (ui_sender)(AppOutput::UpdateStatus("Initialized".to_string()));
 
@@ -88,6 +109,7 @@ impl Actor for Coordinator {
         Ok(CoordinatorState {
             ui_sender,
             audio_capture: Some(audio_capture),
+            audio_processor: Some(audio_processor),
             transcriber: Some(transcriber),
             sample_rate,
             config,
@@ -139,8 +161,11 @@ impl Actor for Coordinator {
                     tracing::debug!("Coordinator: Received audio chunk, size: {}", chunk.0.len());
                 }
 
-                // Forward to transcriber if available
-                if let Some(transcriber) = &state.transcriber {
+                // Forward to audio processor if available
+                if let Some(audio_processor) = &state.audio_processor {
+                    audio_processor.send_message(AudioProcessorMsg::ProcessChunk(chunk))?;
+                } else if let Some(transcriber) = &state.transcriber {
+                    // Fallback if audio processor is not available
                     transcriber.send_message(TranscriberMsg::ProcessAudioChunk(chunk))?;
                 }
             }
@@ -154,6 +179,14 @@ impl Actor for Coordinator {
                 // Forward to UI
                 (state.ui_sender)(AppOutput::UpdateTranscription(transcription.0));
             }
+            CoordinatorMsg::SilenceDetected(is_silence) => {
+                tracing::info!("Silence state changed: {}", is_silence);
+                if is_silence {
+                    (state.ui_sender)(AppOutput::UpdateStatus("Silence detected".to_string()));
+                } else {
+                    (state.ui_sender)(AppOutput::UpdateStatus("Voice detected".to_string()));
+                }
+            }
         }
         Ok(())
     }
@@ -163,6 +196,11 @@ impl Actor for Coordinator {
         _myself: ActorRef<Self::Msg>,
         state: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
+        // Shutdown audio processor if it's running
+        if let Some(audio_processor) = &state.audio_processor {
+            let _ = audio_processor.send_message(AudioProcessorMsg::Shutdown);
+        }
+
         // Shutdown transcriber if it's running
         if let Some(transcriber) = &state.transcriber {
             let _ = transcriber.send_message(TranscriberMsg::Shutdown);

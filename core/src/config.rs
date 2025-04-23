@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use config::{Config, ConfigError, File};
@@ -10,11 +10,42 @@ use tracing::{error, info};
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Settings {
     pub model_path: Option<String>,
+    pub enable_denoise: bool,
+    pub enable_vad: bool,
+    pub vad_mode: VadMode,
+    pub vad_energy_threshold: f32, // Energy threshold for VAD (0.0 to 1.0)
+    pub silence_threshold_ms: u32, // Time in ms to consider silence
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
+pub enum VadMode {
+    Quality,
+    LowBitrate,
+    Aggressive,
+    VeryAggressive,
+}
+
+impl From<VadMode> for webrtc_vad::VadMode {
+    fn from(mode: VadMode) -> Self {
+        match mode {
+            VadMode::Quality => webrtc_vad::VadMode::Quality,
+            VadMode::LowBitrate => webrtc_vad::VadMode::LowBitrate,
+            VadMode::Aggressive => webrtc_vad::VadMode::Aggressive,
+            VadMode::VeryAggressive => webrtc_vad::VadMode::VeryAggressive,
+        }
+    }
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { model_path: None }
+        Self {
+            model_path: None,
+            enable_denoise: true,
+            enable_vad: true,
+            vad_mode: VadMode::Quality,
+            vad_energy_threshold: 0.01, // Default threshold (lower values are more sensitive)
+            silence_threshold_ms: 1000, // 1 second of silence
+        }
     }
 }
 
